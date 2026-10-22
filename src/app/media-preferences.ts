@@ -132,9 +132,21 @@ export function startMediaPreferences(): () => void {
       initialized.add(target);
     }
   };
+  let lastRateCheck = 0;
+  const onTimeUpdate = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLMediaElement)) return;
+    const rate = getSettings().video.playbackRate;
+    if (Math.abs(rate - 1) < 0.001) return;
+    const now = Date.now();
+    if (now - lastRateCheck < 1000) return;
+    lastRateCheck = now;
+    applyRate(target, rate);
+  };
   document.addEventListener("loadedmetadata", onMediaReady, true);
   document.addEventListener("canplay", onMediaReady, true);
   document.addEventListener("play", onMediaReady, true);
+  document.addEventListener("timeupdate", onTimeUpdate, true);
 
   // 学习通等播放器可能在播放中重置倍速，定时重新应用（不改静音，避免覆盖用户操作）
   const rateTimer = setInterval(() => {
@@ -152,6 +164,7 @@ export function startMediaPreferences(): () => void {
     document.removeEventListener("loadedmetadata", onMediaReady, true);
     document.removeEventListener("canplay", onMediaReady, true);
     document.removeEventListener("play", onMediaReady, true);
+    document.removeEventListener("timeupdate", onTimeUpdate, true);
     unsubscribe();
   };
 }
