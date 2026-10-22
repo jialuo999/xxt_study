@@ -1,11 +1,10 @@
-export type TabId = "overview" | "solve" | "bank" | "settings" | "logs";
+export type TabId = "home" | "solve" | "bank" | "settings";
 
 export const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "overview", label: "概览" },
+  { id: "home", label: "主页" },
   { id: "solve", label: "答题" },
   { id: "bank", label: "题库" },
   { id: "settings", label: "设置" },
-  { id: "logs", label: "日志" },
 ];
 
 export function downloadText(filename: string, text: string, mime = "application/json"): void {

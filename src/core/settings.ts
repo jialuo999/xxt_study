@@ -75,6 +75,8 @@ export interface UiSettings {
   y: number;
   width: number;
   height: number;
+  /** 设置页板块展开状态（板块 key → 是否展开） */
+  sectionStates: Record<string, boolean>;
 }
 
 export interface AdvancedSettings {
@@ -124,6 +126,7 @@ export const DEFAULT_SETTINGS: Settings = {
     y: 120,
     width: 408,
     height: 620,
+    sectionStates: {},
   },
   autoTurn: {
     enabled: false,

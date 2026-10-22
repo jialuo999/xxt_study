@@ -40,4 +40,13 @@ describe("settings-store", () => {
     expect(next.solving.includeTypes.multiple).toBe(true);
     expect(next.solving.includeTypes.fill).toBe(true);
   });
+
+  it("设置页板块折叠状态按 key 合并保存", () => {
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    expect(getSettings().ui.sectionStates).toEqual({});
+    updateSettings({ ui: { sectionStates: { ai: false, logs: true } } });
+    const next = updateSettings({ ui: { sectionStates: { bank: true } } });
+    expect(next.ui.sectionStates).toEqual({ ai: false, logs: true, bank: true });
+    expect(next.ui.width).toBe(DEFAULT_SETTINGS.ui.width);
+  });
 });

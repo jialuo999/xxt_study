@@ -70,6 +70,11 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
     }
   };
 
+  const openRemoteSettings = () => {
+    controller.saveSettings({ ui: { sectionStates: { bank: true } } });
+    onNavigate("settings");
+  };
+
   return (
     <div class="sh-stack">
       <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
@@ -163,7 +168,7 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
         title="检索"
         hint="按题干文本模糊搜索本地题库"
         action={
-          <Button size="sm" variant="ghost" onClick={() => onNavigate("settings")}>
+          <Button size="sm" variant="ghost" onClick={openRemoteSettings}>
             远程题库
           </Button>
         }

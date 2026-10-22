@@ -366,6 +366,113 @@
   margin-top: 2px;
 }
 
+/* ---------- 可折叠卡片 ---------- */
+.sh-card--collapse {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sh-collapse-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 44px;
+  transition: background 140ms ease;
+}
+
+.sh-collapse-head:hover {
+  background: var(--sh-surface-hover);
+}
+
+.sh-collapse-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.sh-collapse-toggle:focus-visible {
+  outline: 2px solid rgba(124, 92, 255, 0.65);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.sh-collapse-chevron {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--sh-faint);
+  transition: transform 160ms ease, color 160ms ease;
+}
+
+.sh-collapse-toggle:hover .sh-collapse-chevron {
+  color: var(--sh-text);
+}
+
+.sh-collapse-toggle[aria-expanded="true"] .sh-collapse-chevron {
+  transform: rotate(180deg);
+  color: var(--sh-muted);
+}
+
+.sh-collapse-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sh-collapse-copy .sh-card__hint {
+  margin-top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sh-collapse-toggle[aria-expanded="true"] .sh-collapse-copy .sh-card__hint {
+  white-space: normal;
+}
+
+.sh-collapse-action {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sh-collapse-body {
+  padding: 2px 12px 12px;
+  animation: sh-collapse-in 140ms ease;
+}
+
+.sh-settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 2px;
+}
+
+@keyframes sh-collapse-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .sh-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -577,6 +684,15 @@
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   padding-right: 28px;
+}
+
+.sh-select--compact {
+  width: auto;
+  min-width: 64px;
+  padding: 3px 23px 3px 8px;
+  font-size: 11px;
+  border-radius: 7px;
+  background-position: calc(100% - 12px) 52%, calc(100% - 8px) 52%;
 }
 
 .sh-toggle-row {

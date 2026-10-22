@@ -1,7 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import {
   AI_PRESETS,
-  VIDEO_RATES,
   type DeepPartial,
   type Settings,
   type ThemeMode,
@@ -9,7 +8,7 @@ import {
 import {
   Badge,
   Button,
-  Card,
+  CollapsibleCard,
   Field,
   IconButton,
   Modal,
@@ -20,7 +19,49 @@ import {
 } from "@/ui/components";
 import { MODE_DESC, MODE_LABEL } from "@/ui/labels";
 import type { AiTestView } from "@/ui/contract";
+import { LogsPanel } from "@/ui/LogsPanel";
 import type { PageProps } from "./shared";
+
+type SectionKey =
+  | "solving"
+  | "ai"
+  | "autoTurn"
+  | "media"
+  | "bank"
+  | "advanced"
+  | "appearance"
+  | "data"
+  | "logs";
+
+const SECTION_KEYS: SectionKey[] = [
+  "solving",
+  "ai",
+  "autoTurn",
+  "media",
+  "bank",
+  "advanced",
+  "appearance",
+  "data",
+  "logs",
+];
+
+const DEFAULT_OPEN: Record<SectionKey, boolean> = {
+  solving: true,
+  ai: true,
+  autoTurn: false,
+  media: false,
+  bank: false,
+  advanced: false,
+  appearance: false,
+  data: false,
+  logs: false,
+};
+
+const THEME_LABEL: Record<ThemeMode, string> = {
+  auto: "跟随系统",
+  light: "浅色",
+  dark: "深色",
+};
 
 export function SettingsPage({ controller, state }: PageProps) {
   const settings = state.settings;
@@ -53,6 +94,22 @@ export function SettingsPage({ controller, state }: PageProps) {
     );
   }, [settings.advanced.genericConfig]);
 
+  const save = (patch: DeepPartial<Settings>) => controller.saveSettings(patch);
+
+  const sectionStates = settings.ui.sectionStates ?? {};
+  const isOpen = (key: SectionKey) => sectionStates[key] ?? DEFAULT_OPEN[key];
+  const toggleSection = (key: SectionKey) => {
+    save({ ui: { sectionStates: { [key]: !isOpen(key) } } });
+  };
+  const allOpen = SECTION_KEYS.every((key) => isOpen(key));
+  const toggleAllSections = () => {
+    const next = Object.fromEntries(SECTION_KEYS.map((key) => [key, !allOpen])) as Record<
+      string,
+      boolean
+    >;
+    save({ ui: { sectionStates: next } });
+  };
+
   const saveGenericConfig = () => {
     const text = genericDraft.trim();
     if (!text) {
@@ -81,8 +138,6 @@ export function SettingsPage({ controller, state }: PageProps) {
     }
   };
 
-  const save = (patch: DeepPartial<Settings>) => controller.saveSettings(patch);
-
   const runTest = async () => {
     setTesting(true);
     setTestResult(null);
@@ -101,9 +156,32 @@ export function SettingsPage({ controller, state }: PageProps) {
     }
   };
 
+  const errorCount = state.logs.filter((entry) => entry.level === "error").length;
+
   return (
     <div class="sh-stack">
-      <Card title="答题模式" hint={MODE_DESC[settings.solving.mode]}>
+      <div class="sh-settings-toolbar">
+        <span class="sh-small sh-faint">点击板块标题展开 / 收起</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={allOpen ? "chevronDown" : "chevronRight"}
+          onClick={toggleAllSections}
+        >
+          {allOpen ? "全部收起" : "全部展开"}
+        </Button>
+      </div>
+
+      <CollapsibleCard
+        id="solving"
+        title="答题模式"
+        hint={MODE_DESC[settings.solving.mode]}
+        summary={`${MODE_LABEL[settings.solving.mode]} · ${
+          settings.solving.autoSubmit ? "自动提交" : "手动提交"
+        }`}
+        open={isOpen("solving")}
+        onToggle={() => toggleSection("solving")}
+      >
         <Segmented
           value={settings.solving.mode}
           onChange={(mode) => save({ solving: { mode } })}
@@ -139,7 +217,10 @@ export function SettingsPage({ controller, state }: PageProps) {
           />
         </div>
         <div class="sh-divider" style="margin:9px 0" />
-        <Field label={`最低置信度：${Math.round(settings.solving.minConfidence * 100)}%`} hint="低于该值的答案标记为待确认，不会自动提交。">
+        <Field
+          label={`最低置信度：${Math.round(settings.solving.minConfidence * 100)}%`}
+          hint="低于该值的答案标记为待确认，不会自动提交。"
+        >
           <input
             class="sh-range"
             type="range"
@@ -152,12 +233,22 @@ export function SettingsPage({ controller, state }: PageProps) {
             }
           />
         </Field>
-      </Card>
+      </CollapsibleCard>
 
-      <Card
+      <CollapsibleCard
+        id="ai"
         title="AI 接口"
         hint="OpenAI 兼容 /chat/completions，Key 只保存在本机"
-        action={<Badge tone={settings.ai.enabled ? "success" : "muted"}>{settings.ai.enabled ? "启用" : "关闭"}</Badge>}
+        summary={`${settings.ai.enabled ? "已启用" : "已关闭"} · ${
+          settings.ai.apiKey ? "Key 已配置" : "未配置 Key"
+        }`}
+        open={isOpen("ai")}
+        onToggle={() => toggleSection("ai")}
+        action={
+          <Badge tone={settings.ai.enabled ? "success" : "muted"}>
+            {settings.ai.enabled ? "启用" : "关闭"}
+          </Badge>
+        }
       >
         <Toggle
           checked={settings.ai.enabled}
@@ -236,15 +327,27 @@ export function SettingsPage({ controller, state }: PageProps) {
             </Button>
           </div>
           {testResult ? (
-            <div class="sh-hint" style={{ color: testResult.ok ? "var(--sh-success)" : "var(--sh-danger)" }}>
+            <div
+              class="sh-hint"
+              style={{ color: testResult.ok ? "var(--sh-success)" : "var(--sh-danger)" }}
+            >
               {testResult.message}
               {testResult.latencyMs ? ` · ${testResult.latencyMs}ms` : ""}
             </div>
           ) : null}
         </div>
-      </Card>
+      </CollapsibleCard>
 
-      <Card title="自动翻页" hint="只操作页面按钮，不伪造学习进度">
+      <CollapsibleCard
+        id="autoTurn"
+        title="自动翻页"
+        hint="只操作页面按钮，不伪造学习进度；延迟与步数使用内置默认值"
+        summary={`${settings.autoTurn.enabled ? "已启用" : "未启用"} · ${
+          settings.autoTurn.waitVideoEnd ? "等待视频结束" : "不等待视频"
+        }`}
+        open={isOpen("autoTurn")}
+        onToggle={() => toggleSection("autoTurn")}
+      >
         <Toggle
           checked={settings.autoTurn.enabled}
           onChange={(enabled) => save({ autoTurn: { enabled } })}
@@ -255,7 +358,7 @@ export function SettingsPage({ controller, state }: PageProps) {
           checked={settings.autoTurn.waitVideoEnd}
           onChange={(waitVideoEnd) => save({ autoTurn: { waitVideoEnd } })}
           label="等待视频/音频结束"
-          description="播放结束后再翻页；无音视频时按下方的等待时间处理。"
+          description="播放结束后再翻页；无音视频时按内置等待时间处理。"
         />
         <Toggle
           checked={settings.autoTurn.stopOnUnanswered}
@@ -269,93 +372,22 @@ export function SettingsPage({ controller, state }: PageProps) {
           label="刷新/跳转后自动恢复"
           description="恢复上次的步数；关闭后每次刷新都需要手动开始。"
         />
+      </CollapsibleCard>
 
-        <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px">
-          <Field label="开始前延迟 (ms)" hint="点击开始后等待多久进入第一步。">
-            <TextInput
-              type="number"
-              min="0"
-              step="100"
-              value={settings.autoTurn.startDelayMs}
-              onBlur={(event) => {
-                const value = Number(event.currentTarget.value);
-                if (Number.isFinite(value)) save({ autoTurn: { startDelayMs: Math.max(0, value) } });
-              }}
-            />
-          </Field>
-          <Field label="无音视频时等待 (ms)" hint="文档/PPT/阅读页用。">
-            <TextInput
-              type="number"
-              min="0"
-              step="500"
-              value={settings.autoTurn.contentWaitMs}
-              onBlur={(event) => {
-                const value = Number(event.currentTarget.value);
-                if (Number.isFinite(value)) save({ autoTurn: { contentWaitMs: Math.max(0, value) } });
-              }}
-            />
-          </Field>
-        </div>
-
-        <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px">
-          <Field label="最小延迟 (ms)">
-            <TextInput
-              type="number"
-              min="500"
-              step="100"
-              value={settings.autoTurn.minDelayMs}
-              onBlur={(event) => {
-                const value = Number(event.currentTarget.value);
-                if (Number.isFinite(value)) save({ autoTurn: { minDelayMs: Math.max(500, value) } });
-              }}
-            />
-          </Field>
-          <Field label="最大延迟 (ms)">
-            <TextInput
-              type="number"
-              min="800"
-              step="100"
-              value={settings.autoTurn.maxDelayMs}
-              onBlur={(event) => {
-                const value = Number(event.currentTarget.value);
-                if (Number.isFinite(value)) save({ autoTurn: { maxDelayMs: Math.max(800, value) } });
-              }}
-            />
-          </Field>
-        </div>
-        <Field label="最大步数" hint="防止无限循环，默认 200。">
-          <TextInput
-            type="number"
-            min="1"
-            max="2000"
-            value={settings.autoTurn.maxSteps}
-            onBlur={(event) => {
-              const value = Number(event.currentTarget.value);
-              if (Number.isFinite(value)) save({ autoTurn: { maxSteps: Math.max(1, Math.min(2000, value)) } });
-            }}
-          />
-        </Field>
-      </Card>
-
-      <Card title="视频 / 音频" hint="静音与倍速立即应用；暂停恢复只在自动翻页时生效">
+      <CollapsibleCard
+        id="media"
+        title="媒体播放"
+        hint="静音与倍速立即应用；暂停恢复只在自动翻页时生效"
+        summary={`${settings.video.defaultMuted ? "默认静音" : "不静音"} · 倍速在主页调整`}
+        open={isOpen("media")}
+        onToggle={() => toggleSection("media")}
+      >
         <Toggle
           checked={settings.video.defaultMuted}
           onChange={(defaultMuted) => save({ video: { defaultMuted } })}
           label="默认静音"
           description="打开媒体时自动静音，可随时在播放器里取消。"
         />
-        <Field label="默认倍速" hint="播放器支持时生效，1x 为原始速度。">
-          <Select
-            value={String(settings.video.playbackRate)}
-            onChange={(event) =>
-              save({ video: { playbackRate: Number(event.currentTarget.value) || 1 } })
-            }
-            options={VIDEO_RATES.map((rate) => ({
-              value: String(rate),
-              label: `${rate}x`,
-            }))}
-          />
-        </Field>
         <Toggle
           checked={settings.video.resumeOnPause}
           onChange={(resumeOnPause) => save({ video: { resumeOnPause } })}
@@ -363,12 +395,23 @@ export function SettingsPage({ controller, state }: PageProps) {
           description="只在等待媒体结束的自动翻页流程里生效；关闭翻页后不会干预视频/音频。"
         />
         <div class="sh-hint" style="margin-top:6px">
-          只调整页面中 video / audio 元素的 muted 与 playbackRate，不伪造进度、不调用平台日志接口。
+          播放倍速已移到主页「自动翻页」卡片，默认 1x。这里只调整页面中 video / audio
+          元素的 muted 与 playbackRate，不伪造进度、不调用平台日志接口。
         </div>
-      </Card>
+      </CollapsibleCard>
 
-      <Card title="题库与缓存">
-        <Field label={`模糊匹配阈值：${settings.bank.fuzzyThreshold.toFixed(2)}`} hint="越高越严格；建议 0.84–0.90。">
+      <CollapsibleCard
+        id="bank"
+        title="题库与缓存"
+        hint="本地 IndexedDB，可导入导出；远程题库为可选能力"
+        summary={`${state.bank.total} 条 · 模糊阈值 ${settings.bank.fuzzyThreshold.toFixed(2)}`}
+        open={isOpen("bank")}
+        onToggle={() => toggleSection("bank")}
+      >
+        <Field
+          label={`模糊匹配阈值：${settings.bank.fuzzyThreshold.toFixed(2)}`}
+          hint="越高越严格；建议 0.84–0.90。"
+        >
           <input
             class="sh-range"
             type="range"
@@ -439,9 +482,18 @@ export function SettingsPage({ controller, state }: PageProps) {
             </Field>
           </div>
         ) : null}
-      </Card>
+      </CollapsibleCard>
 
-      <Card title="高级 / 通用适配器" hint="为学习通之外的平台配置选择器（实验性）">
+      <CollapsibleCard
+        id="advanced"
+        title="高级与通用适配器"
+        hint="为学习通之外的平台配置选择器（实验性）"
+        summary={`${settings.advanced.debug ? "调试开" : "调试关"}${
+          settings.advanced.genericConfig ? " · 已配置通用适配器" : ""
+        }`}
+        open={isOpen("advanced")}
+        onToggle={() => toggleSection("advanced")}
+      >
         <Toggle
           checked={settings.advanced.debug}
           onChange={(debug) => save({ advanced: { debug } })}
@@ -481,9 +533,15 @@ export function SettingsPage({ controller, state }: PageProps) {
             清空编辑框
           </Button>
         </div>
-      </Card>
+      </CollapsibleCard>
 
-      <Card title="外观与快捷键">
+      <CollapsibleCard
+        id="appearance"
+        title="外观与快捷键"
+        summary={`${THEME_LABEL[settings.ui.theme]} · ${settings.ui.hotkey}`}
+        open={isOpen("appearance")}
+        onToggle={() => toggleSection("appearance")}
+      >
         <Field label="主题">
           <Segmented<ThemeMode>
             value={settings.ui.theme}
@@ -498,30 +556,45 @@ export function SettingsPage({ controller, state }: PageProps) {
         <Field label="快捷键" hint="格式示例：Alt+Shift+S；保存后立即生效。">
           <TextInput
             value={settings.ui.hotkey}
-            onBlur={(event) => save({ ui: { hotkey: event.currentTarget.value.trim() || "Alt+Shift+S" } })}
+            onBlur={(event) =>
+              save({ ui: { hotkey: event.currentTarget.value.trim() || "Alt+Shift+S" } })
+            }
           />
         </Field>
-      </Card>
+      </CollapsibleCard>
 
-      <Card title="数据与隐私" hint="所有数据只保存在本机，不上传">
+      <CollapsibleCard
+        id="data"
+        title="数据与隐私"
+        hint="所有数据只保存在本机，不上传"
+        summary={`Key ${settings.ai.apiKey ? "已设置" : "未设置"} · 题库 ${state.bank.total} 条`}
+        open={isOpen("data")}
+        onToggle={() => toggleSection("data")}
+      >
         <div class="sh-actions">
           <Button size="sm" variant="danger" icon="trash" onClick={() => setResetConfirm(true)}>
             恢复默认设置
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon="bug"
-            onClick={() => controller.clearLogs()}
-          >
-            清空日志
-          </Button>
         </div>
         <div class="sh-hint" style="margin-top:8px">
           当前 Key：{settings.ai.apiKey ? mask(settings.ai.apiKey) : "未设置"} · 题库{" "}
-          {state.bank.total} 条
+          {state.bank.total} 条 · 运行日志在下方「运行日志」板块中管理。
         </div>
-      </Card>
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        id="logs"
+        title="运行日志"
+        hint="操作、AI 请求与错误记录，已自动脱敏 Key / Authorization"
+        summary={`${state.logs.length} 条记录${errorCount ? ` · ${errorCount} 条错误` : ""}`}
+        open={isOpen("logs")}
+        onToggle={() => toggleSection("logs")}
+        action={
+          errorCount ? <Badge tone="danger">{errorCount} 错误</Badge> : undefined
+        }
+      >
+        <LogsPanel controller={controller} state={state} />
+      </CollapsibleCard>
 
       <Modal
         open={examConfirm}

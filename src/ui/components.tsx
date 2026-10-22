@@ -303,6 +303,65 @@ export function Card({
   );
 }
 
+export function CollapsibleCard({
+  id,
+  title,
+  hint,
+  summary,
+  open,
+  onToggle,
+  accent,
+  action,
+  children,
+}: {
+  id: string;
+  title: string;
+  hint?: string;
+  summary?: string;
+  open: boolean;
+  onToggle: () => void;
+  accent?: boolean;
+  action?: ComponentChildren;
+  children: ComponentChildren;
+}) {
+  const bodyId = `sh-section-${id}`;
+  return (
+    <section
+      class={`sh-card sh-card--collapse ${accent ? "sh-card--accent" : ""}`}
+      data-section={id}
+      data-open={open ? "true" : "false"}
+    >
+      <div class="sh-collapse-head">
+        <button
+          type="button"
+          class="sh-collapse-toggle"
+          aria-expanded={open}
+          aria-controls={open ? bodyId : undefined}
+          onClick={onToggle}
+        >
+          <span class="sh-collapse-chevron" aria-hidden="true">
+            <Icon name="chevronDown" size={14} />
+          </span>
+          <span class="sh-collapse-copy">
+            <span class="sh-card__title">{title}</span>
+            {open && hint ? (
+              <span class="sh-card__hint">{hint}</span>
+            ) : !open && (summary || hint) ? (
+              <span class="sh-card__hint">{summary ?? hint}</span>
+            ) : null}
+          </span>
+        </button>
+        {action ? <div class="sh-collapse-action">{action}</div> : null}
+      </div>
+      {open ? (
+        <div class="sh-collapse-body" id={bodyId}>
+          {children}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function Stat({ value, label }: { value: ComponentChildren; label: string }) {
   return (
     <div class="sh-stat">

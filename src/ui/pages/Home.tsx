@@ -1,15 +1,18 @@
-import { Badge, Button, Card, Confidence, EmptyState, Icon, Progress, Stat, formatRelative } from "@/ui/components";
+import { Badge, Button, Card, Icon, Select, Stat } from "@/ui/components";
 import { MODE_LABEL, SOURCE_LABEL } from "@/ui/labels";
-import { PAGE_KIND_LABEL, QUESTION_TYPE_LABEL } from "@/core/settings";
+import { PAGE_KIND_LABEL, QUESTION_TYPE_LABEL, VIDEO_RATES } from "@/core/settings";
 import type { PageProps } from "./shared";
 
-export function OverviewPage({ controller, state, onNavigate }: PageProps) {
-  const { page, questions, results, autoTurn, frames, settings, logs } = state;
+export function HomePage({ controller, state, onNavigate }: PageProps) {
+  const { page, questions, results, autoTurn, frames, settings } = state;
   const solved = questions.filter((question) => results[question.id]?.status === "solved").length;
   const pending = questions.filter((question) => results[question.id]?.status === "pending").length;
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);
   const examBlocked = page.kind === "exam" && !settings.solving.allowExam;
-  const recentLogs = [...logs].slice(-4).reverse();
+  const openSettingsSection = (key: string) => {
+    controller.saveSettings({ ui: { sectionStates: { [key]: true } } });
+    onNavigate("settings");
+  };
 
   return (
     <div class="sh-stack">
@@ -26,7 +29,7 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
           </div>
           <div class="sh-faint sh-small sh-truncate" style="margin-top:2px">
             {safeHost(page.url)}
-            {state.frames.length > 1 ? ` · ${state.frames.length} 个 frame` : ""}
+            {frames.length > 1 ? ` · ${frames.length} 个 frame` : ""}
           </div>
         </div>
         <Badge tone={state.status === "error" ? "danger" : busy ? "warn" : "accent"}>
@@ -46,7 +49,7 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
             </div>
           </div>
           <div style="margin-top:8px">
-            <Button size="sm" variant="ghost" icon="settings" onClick={() => onNavigate("settings")}>
+            <Button size="sm" variant="ghost" icon="settings" onClick={() => openSettingsSection("solving")}>
               前往设置
             </Button>
           </div>
@@ -61,7 +64,7 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
               <div class="sh-card__title">还差一个 API Key</div>
               <div class="sh-card__hint">填写 OpenAI 兼容接口的 Key 后即可使用 AI 解题。</div>
             </div>
-            <Button size="sm" variant="ghost" onClick={() => onNavigate("settings")}>
+            <Button size="sm" variant="ghost" onClick={() => openSettingsSection("ai")}>
               配置
             </Button>
           </div>
@@ -93,14 +96,27 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
       >
         <div class="sh-stack" style="gap:8px">
           <div class="sh-row sh-row--between">
-            <span class="sh-small sh-muted">
-              进度 {autoTurn.steps}/{autoTurn.maxSteps} 步
-            </span>
-            <span class="sh-small sh-faint">
-              {settings.autoTurn.waitVideoEnd ? "等待视频结束" : "不等待视频"}
-            </span>
+            <span class="sh-small sh-muted">已翻 {autoTurn.steps} 页</span>
+            <div class="sh-row" style="gap:6px">
+              <span class="sh-small sh-faint">倍速</span>
+              <Select
+                class="sh-select--compact"
+                value={String(settings.video.playbackRate)}
+                onChange={(event) =>
+                  controller.saveSettings({
+                    video: { playbackRate: Number(event.currentTarget.value) || 1 },
+                  })
+                }
+                options={VIDEO_RATES.map((rate) => ({
+                  value: String(rate),
+                  label: `${rate}x`,
+                }))}
+              />
+            </div>
           </div>
-          <Progress value={autoTurn.steps} max={autoTurn.maxSteps || 1} />
+          <div class="sh-small sh-faint">
+            {settings.autoTurn.waitVideoEnd ? "等待视频/音频结束再翻页" : "不等待视频，直接翻页"}
+          </div>
           <div class="sh-actions">
             {autoTurn.running ? (
               <Button size="sm" icon="pause" onClick={() => controller.stopAutoTurn()}>
@@ -120,7 +136,7 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
             <Button size="sm" icon="scan" disabled={busy} onClick={() => void controller.refresh()}>
               重新扫描
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => onNavigate("settings")}>
+            <Button size="sm" variant="ghost" onClick={() => openSettingsSection("autoTurn")}>
               翻页设置
             </Button>
           </div>
@@ -174,28 +190,6 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
               : "尚未解题"}
           </div>
         ) : null}
-      </Card>
-
-      <Card
-        title="最近日志"
-        action={
-          <Button size="sm" variant="ghost" onClick={() => onNavigate("logs")}>
-            全部
-          </Button>
-        }
-      >
-        {recentLogs.length === 0 ? (
-          <EmptyState icon="bug" title="暂无日志" description="操作记录会显示在这里。" />
-        ) : (
-          <div class="sh-stack" style="gap:4px">
-            {recentLogs.map((entry) => (
-              <div class="sh-log" data-level={entry.level} key={entry.id}>
-                <span class="sh-log__time">{formatRelative(entry.ts)}</span>
-                <span class="sh-log__msg sh-truncate">{entry.message}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </Card>
 
       <div class="sh-hint" style="text-align:center;padding:2px 0 6px">

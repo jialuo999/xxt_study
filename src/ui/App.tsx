@@ -4,11 +4,10 @@ import type { UiController, UiState } from "./contract";
 import { useController } from "./useController";
 import { Badge, Icon, IconButton, Modal, Button } from "./components";
 import { TABS, type TabId } from "./tabs";
-import { OverviewPage } from "./pages/Overview";
+import { HomePage } from "./pages/Home";
 import { SolvePage } from "./pages/Solve";
 import { BankPage } from "./pages/Bank";
 import { SettingsPage } from "./pages/Settings";
-import { LogsPage } from "./pages/Logs";
 
 type DragMode = "bubble" | "panel";
 
@@ -238,8 +237,8 @@ export function App({ controller }: { controller: UiController }) {
           </nav>
 
           <div class="sh-content">
-            {tab === "overview" ? (
-              <OverviewPage controller={controller} state={state} onNavigate={setTab} />
+            {tab === "home" ? (
+              <HomePage controller={controller} state={state} onNavigate={setTab} />
             ) : null}
             {tab === "solve" ? (
               <SolvePage controller={controller} state={state} onNavigate={setTab} />
@@ -249,9 +248,6 @@ export function App({ controller }: { controller: UiController }) {
             ) : null}
             {tab === "settings" ? (
               <SettingsPage controller={controller} state={state} onNavigate={setTab} />
-            ) : null}
-            {tab === "logs" ? (
-              <LogsPage controller={controller} state={state} onNavigate={setTab} />
             ) : null}
           </div>
         </section>
@@ -344,5 +340,5 @@ function clamp(value: number, min: number, max: number): number {
 
 function readInitialTab(): TabId {
   const hash = window.location.hash.replace(/^#/, "").trim().toLowerCase();
-  return TABS.some((item) => item.id === hash) ? (hash as TabId) : "overview";
+  return TABS.some((item) => item.id === hash) ? (hash as TabId) : "home";
 }
