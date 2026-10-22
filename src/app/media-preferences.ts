@@ -21,7 +21,7 @@ function collectShadowMedia(root: ParentNode, out: HTMLMediaElement[], depth = 0
   }
 }
 
-function collectMedia(doc: Document = document, depth = 0): HTMLMediaElement[] {
+function collectDocumentMedia(doc: Document = document): HTMLMediaElement[] {
   const media: HTMLMediaElement[] = [];
   try {
     media.push(...Array.from(doc.querySelectorAll<HTMLMediaElement>("video, audio")));
@@ -32,6 +32,11 @@ function collectMedia(doc: Document = document, depth = 0): HTMLMediaElement[] {
   } catch {
     /* ignore */
   }
+  return media;
+}
+
+function collectMedia(doc: Document = document, depth = 0): HTMLMediaElement[] {
+  const media = collectDocumentMedia(doc);
   if (depth >= 3) return media;
   for (const iframe of Array.from(doc.querySelectorAll("iframe"))) {
     try {
@@ -58,12 +63,15 @@ function applyRate(media: HTMLMediaElement, rateValue: number): void {
   }
 }
 
-/** 显式把静音与倍速应用到指定文档（用于测试或一次性应用） */
+/**
+ * 一次性强制应用静音与倍速（仅测试或显式调用；生产请用 startMediaPreferences）。
+ * 注意：defaultMuted=false 时会强制取消静音，且 1x 也会写入倍速。
+ */
 export function applyMediaPreferences(
   doc: Document = document,
   settings: VideoSettings = getSettings().video,
 ): number {
-  const media = collectMedia(doc);
+  const media = collectDocumentMedia(doc);
   for (const element of media) {
     try {
       if (element.muted !== settings.defaultMuted) element.muted = settings.defaultMuted;
@@ -117,12 +125,12 @@ export function startMediaPreferences(): () => void {
 
   const applyAll = (): void => {
     const settings = getSettings().video;
-    for (const media of collectMedia()) applyToMedia(media, settings);
+    for (const media of collectDocumentMedia()) applyToMedia(media, settings);
   };
 
   const applyNew = (): void => {
     const settings = getSettings().video;
-    for (const media of collectMedia()) {
+    for (const media of collectDocumentMedia()) {
       if (!initialized.has(media)) applyToMedia(media, settings);
     }
   };
@@ -183,7 +191,7 @@ export function startMediaPreferences(): () => void {
   const rateTimer = setInterval(() => {
     const rate = getSettings().video.playbackRate;
     if (Math.abs(rate - 1) < 0.001) return;
-    for (const media of collectMedia()) applyRate(media, rate);
+    for (const media of collectDocumentMedia()) applyRate(media, rate);
   }, 2000);
 
   const unsubscribe = subscribeSettings(() => {
@@ -196,11 +204,11 @@ export function startMediaPreferences(): () => void {
     if (muteChanged) {
       mutedByUser = new WeakSet<HTMLMediaElement>();
       if (next.defaultMuted) {
-        for (const media of collectMedia()) muteOnce(media, true);
+        for (const media of collectDocumentMedia()) muteOnce(media, true);
       }
     }
     if (rateChanged) {
-      for (const media of collectMedia()) applyRate(media, next.playbackRate);
+      for (const media of collectDocumentMedia()) applyRate(media, next.playbackRate);
     }
   });
 
@@ -218,3 +226,4 @@ export function startMediaPreferences(): () => void {
 }
 
 export { collectMedia };
+

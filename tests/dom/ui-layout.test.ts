@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { h, render, type ComponentChild } from "preact";
 import { App } from "../../src/ui/App";
 import { HomePage } from "../../src/ui/pages/Home";
+import { BankPage } from "../../src/ui/pages/Bank";
 import { SettingsPage } from "../../src/ui/pages/Settings";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import type { UiController, UiState } from "../../src/ui/contract";
@@ -95,6 +96,22 @@ describe("导航与主页布局", () => {
     expect(onNavigate).toHaveBeenCalledWith("settings");
   });
 
+  it("从题库进入远程题库设置时先展开合并后的答题板块", () => {
+    const state = makeState();
+    const { controller, saveSettings } = makeController(state);
+    const onNavigate = vi.fn();
+    const container = mount(h(BankPage, { controller, state, onNavigate }));
+
+    const settingsButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "远程题库",
+    );
+    expect(settingsButton).toBeDefined();
+    settingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { solving: true } } });
+    expect(onNavigate).toHaveBeenCalledWith("settings");
+  });
+
   it("拖动悬浮球松手时同步提交位置并清除 transform", () => {
     const state = makeState();
     state.settings.ui.collapsed = true;
@@ -113,6 +130,31 @@ describe("导航与主页布局", () => {
     window.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, clientY: 140 }));
 
     const moved = container.querySelector<HTMLElement>(".sh-bubble");
+    expect(moved?.style.left).toBe("150px");
+    expect(moved?.style.top).toBe("140px");
+    expect(moved?.style.transform).toBe("");
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { x: 150, y: 140 } });
+  });
+
+  it("拖动面板松手时同样同步位置并清除 transform", () => {
+    const state = makeState();
+    state.settings.ui.collapsed = false;
+    state.settings.ui.x = 100;
+    state.settings.ui.y = 100;
+    state.settings.ui.width = 408;
+    state.settings.ui.height = 620;
+    const { controller, saveSettings } = makeController(state);
+    const container = mount(h(App, { controller }));
+    const header = container.querySelector<HTMLElement>(".sh-panel__header");
+    expect(header).not.toBeNull();
+
+    header?.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 110, clientY: 110 }),
+    );
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 160, clientY: 150 }));
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 160, clientY: 150 }));
+
+    const moved = container.querySelector<HTMLElement>(".sh-panel");
     expect(moved?.style.left).toBe("150px");
     expect(moved?.style.top).toBe("140px");
     expect(moved?.style.transform).toBe("");
@@ -155,6 +197,22 @@ describe("设置页折叠板块", () => {
     const autoTurnSection = container.querySelector('[data-section="autoTurn"]');
     expect(autoTurnSection).not.toBeNull();
     expect(autoTurnSection?.textContent).toContain("媒体播放");
+  });
+
+  it("旧 bank/media 折叠状态不会破坏 7 板块渲染", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ui.sectionStates = { bank: true, media: true };
+    const state = makeState({ settings });
+    const { controller } = makeController(state);
+    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
+
+    expect(container.querySelectorAll("[data-section]")).toHaveLength(7);
+    const expanded = (id: string) =>
+      container
+        .querySelector(`[data-section="${id}"] .sh-collapse-toggle`)
+        ?.getAttribute("aria-expanded");
+    expect(expanded("solving")).toBe("true");
+    expect(expanded("autoTurn")).toBe("false");
   });
 
   it("点击板块标题写入对应的展开状态", () => {

@@ -346,11 +346,6 @@ export async function waitForMedia(
       pausedSince.delete(element);
       return;
     }
-    const canResume = preferences.resumeOnPause;
-    if (!canResume) {
-      if (!pausedSince.has(element)) pausedSince.set(element, now);
-      return;
-    }
     const last = lastAttempt.get(element) ?? 0;
     if (now - last < 2000) return;
     lastAttempt.set(element, now);

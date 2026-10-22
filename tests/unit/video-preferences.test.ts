@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyMediaPreferences, startMediaPreferences } from "../../src/app/media-preferences";
+import {
+  applyMediaPreferences,
+  collectMedia,
+  startMediaPreferences,
+} from "../../src/app/media-preferences";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 
@@ -76,6 +80,24 @@ describe("media-preferences", () => {
     });
     expect(count).toBe(1);
     expect(video.playbackRate).toBe(2);
+  });
+
+  it("媒体偏好只处理当前文档，同源 iframe 交给子 frame 自己的实例", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const childDoc = iframe.contentDocument;
+    expect(childDoc).not.toBeNull();
+    const video = childDoc!.createElement("video");
+    childDoc!.body.appendChild(video);
+
+    const count = applyMediaPreferences(document, {
+      defaultMuted: true,
+      playbackRate: 2,
+      resumeOnPause: true,
+    });
+    expect(count).toBe(0);
+    expect(video.muted).toBe(false);
+    expect(collectMedia(document)).toContain(video);
   });
 
   it("平台重置倍速后定时重新应用设置", async () => {

@@ -17,7 +17,7 @@ import {
   TextInput,
   Toggle,
 } from "@/ui/components";
-import { MODE_DESC, MODE_LABEL } from "@/ui/labels";
+import { MODE_LABEL } from "@/ui/labels";
 import type { AiTestView } from "@/ui/contract";
 import { LogsPanel } from "@/ui/LogsPanel";
 import type { PageProps } from "./shared";
@@ -271,7 +271,7 @@ export function SettingsPage({ controller, state }: PageProps) {
                 onBlur={(event) => save({ bank: { remote: { url: event.currentTarget.value.trim() } } })}
               />
             </Field>
-            <Field label="答案字段路径" hint="如 data.answer">
+            <Field label="答案字段路径" hint="如 data.answer；留空用 answer">
               <TextInput
                 value={settings.bank.remote.answerPath}
                 placeholder="answer"
@@ -409,7 +409,7 @@ export function SettingsPage({ controller, state }: PageProps) {
       <CollapsibleCard
         id="autoTurn"
         title="自动翻页"
-        hint="翻页与媒体行为；延迟和步数使用内置默认值"
+        hint="翻页与媒体行为（延迟/步数内置）"
         summary={`${settings.autoTurn.enabled ? "已启用" : "未启用"} · ${
           settings.video.defaultMuted ? "默认静音" : "不静音"
         }`}
@@ -455,7 +455,7 @@ export function SettingsPage({ controller, state }: PageProps) {
           description="翻页等待时恢复暂停"
         />
         <div class="sh-hint" style="margin-top:6px">
-          倍速在主页「自动翻页」卡片调整，默认 1x；不伪造进度。
+          倍速在主页「自动翻页」卡片调整，默认 1x；不伪造进度
         </div>
       </CollapsibleCard>
 
@@ -477,7 +477,7 @@ export function SettingsPage({ controller, state }: PageProps) {
         />
         <Field
           label="通用适配器 JSON"
-          hint="字段：name / matches / questionContainer / stem"
+          hint="必填：name / matches / questionContainer / stem"
         >
           <textarea
             class="sh-textarea"

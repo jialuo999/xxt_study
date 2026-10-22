@@ -34,9 +34,3 @@ export const MODE_LABEL = {
   review: "复核后提交",
   auto: "全自动",
 } as const;
-
-export const MODE_DESC = {
-  hint: "只展示答案，不操作页面",
-  review: "自动填入，人工复核后提交",
-  auto: "自动填入并按设置提交，低置信暂停",
-} as const;

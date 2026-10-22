@@ -71,7 +71,7 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
   };
 
   const openRemoteSettings = () => {
-    controller.saveSettings({ ui: { sectionStates: { bank: true } } });
+    controller.saveSettings({ ui: { sectionStates: { solving: true } } });
     onNavigate("settings");
   };
 

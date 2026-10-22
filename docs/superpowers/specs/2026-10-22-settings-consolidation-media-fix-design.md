@@ -44,6 +44,7 @@
 - 默认静音只在新媒体第一次出现时应用一次；用户手动静音/取消静音通过 `volumechange` 记录，之后不再覆盖。
 - 配置为 1x 时完全不写 `playbackRate`；非 1x 才在平台重置后由 `timeupdate` / 定时器补回。
 - 设置变更只在 `defaultMuted` 或 `playbackRate` 真正变化时应用；主题、折叠板块等普通变更不再重置媒体。
+- 媒体偏好只处理当前文档（含开放 Shadow DOM）；同源 iframe 由子 frame 自己的实例处理，避免 host 与子 frame 重复应用。
 - 关闭默认静音时不强制取消静音，保持用户当前状态。
 - `resumeOnPause` 关闭时：不自动 `play()`，不把暂停判定为阻塞；自动翻页等待用户手动恢复。
 - `agent.resumeMedia` 仍在 `resumeOnPause` 开启时才恢复子 frame 媒体。
