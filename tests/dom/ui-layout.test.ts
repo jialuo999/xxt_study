@@ -272,7 +272,7 @@ describe("设置页折叠板块", () => {
     }
   });
 
-  it("媒体播放不再提供默认倍速，提示去主页调整", () => {
+  it("媒体播放不再提供默认倍速", () => {
     const settings = structuredClone(DEFAULT_SETTINGS);
     settings.ui.sectionStates = { autoTurn: true };
     const state = makeState({ settings });
@@ -281,7 +281,8 @@ describe("设置页折叠板块", () => {
 
     const text = container.textContent ?? "";
     expect(text).not.toContain("默认倍速");
-    expect(text).toContain("主页");
+    expect(text).not.toContain("倍速在主页");
+    expect(text).toContain("默认静音");
   });
 
   it("日志内嵌在设置中：展开后显示筛选、导出与清空确认", async () => {

@@ -34,7 +34,8 @@ export type IconName =
   | "shield"
   | "external"
   | "copy"
-  | "search";
+  | "search"
+  | "bookOpen";
 
 const ICON_PATHS: Record<IconName, ComponentChildren> = {
   spark: (
@@ -177,6 +178,12 @@ const ICON_PATHS: Record<IconName, ComponentChildren> = {
     <>
       <circle cx="11" cy="11" r="7" />
       <path d="M20 20l-4-4" />
+    </>
+  ),
+  bookOpen: (
+    <>
+      <path d="M12 6.6C9.8 4.9 7.1 4.2 4 4.5v13.2c3.1-.3 5.8.4 8 2.1 2.2-1.7 4.9-2.4 8-2.1V4.5c-3.1-.3-5.8.4-8 2.1z" />
+      <path d="M12 6.6v13.2" />
     </>
   ),
 };

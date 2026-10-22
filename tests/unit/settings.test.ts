@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "../../src/core/settings";
-import { getSettings, replaceSettings, updateSettings } from "../../src/core/settings-store";
+import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../../src/core/settings";
+import {
+  getSettings,
+  refreshSettings,
+  replaceSettings,
+  updateSettings,
+} from "../../src/core/settings-store";
 
 describe("settings-store", () => {
   it("空存储 / null 时回退到完整默认设置，不崩溃", () => {
@@ -48,5 +53,18 @@ describe("settings-store", () => {
     const next = updateSettings({ ui: { sectionStates: { bank: true } } });
     expect(next.ui.sectionStates).toEqual({ ai: false, logs: true, bank: true });
     expect(next.ui.width).toBe(DEFAULT_SETTINGS.ui.width);
+  });
+
+  it("refreshSettings 能同步其他 frame 写入 GM 存储的设置", () => {
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    const external = structuredClone(DEFAULT_SETTINGS);
+    external.video.playbackRate = 1.75;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(external));
+
+    const refreshed = refreshSettings();
+    expect(refreshed.video.playbackRate).toBe(1.75);
+    expect(getSettings().video.playbackRate).toBe(1.75);
+    // 无变化时返回同一缓存对象，不重复通知
+    expect(refreshSettings()).toBe(refreshed);
   });
 });

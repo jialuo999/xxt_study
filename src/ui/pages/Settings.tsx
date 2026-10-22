@@ -454,9 +454,6 @@ export function SettingsPage({ controller, state }: PageProps) {
           label="自动翻页时暂停后恢复"
           description="翻页等待时恢复暂停"
         />
-        <div class="sh-hint" style="margin-top:6px">
-          倍速在主页「自动翻页」卡片调整，默认 1x；不伪造进度
-        </div>
       </CollapsibleCard>
 
       <CollapsibleCard

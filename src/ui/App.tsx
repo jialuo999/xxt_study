@@ -178,7 +178,7 @@ export function App({ controller }: { controller: UiController }) {
           title="学习助手（拖动可移动）"
           onPointerDown={(event) => startDrag(event, "bubble")}
         >
-          <Icon name="spark" size={25} className="sh-bubble__glyph" />
+          <Icon name="bookOpen" size={25} className="sh-bubble__glyph" />
           <span class="sh-bubble__dot" data-busy={busy ? "true" : "false"} />
         </button>
       ) : (
@@ -200,7 +200,7 @@ export function App({ controller }: { controller: UiController }) {
           >
             <div class="sh-brand">
               <div class="sh-logo">
-                <Icon name="spark" size={17} />
+                <Icon name="bookOpen" size={17} />
               </div>
               <div>
                 <div class="sh-brand__title">学习助手</div>

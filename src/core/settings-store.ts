@@ -52,6 +52,32 @@ function emit(settings: Settings): void {
   }
 }
 
+function settingsEqual(a: Settings, b: Settings): boolean {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 从 GM 存储重新读取设置，用于跨 frame 同步。
+ *
+ * 顶层 frame 修改倍速/静音后，子 frame 的 settings-store 缓存不会自动更新；
+ * 媒体偏好模块会低频调用本函数，让跨域 iframe 里的播放器也能拿到新设置。
+ */
+export function refreshSettings(): Settings {
+  const current = getSettings();
+  const raw = gmGet<unknown>(SETTINGS_KEY, null);
+  // 读取失败或存储被清空时保持当前缓存，避免瞬时的空值把设置重置为默认
+  if (!isPlainObject(raw)) return current;
+  const next = normalize(raw);
+  if (settingsEqual(next, current)) return current;
+  cached = next;
+  emit(next);
+  return next;
+}
+
 export function updateSettings(patch: DeepPartial<Settings>): Settings {
   const next = normalize(merge(getSettings(), patch));
   cached = next;

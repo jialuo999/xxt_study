@@ -84,7 +84,7 @@
   place-items: center;
   background:
     radial-gradient(120% 120% at 30% 20%, rgba(255, 255, 255, 0.28), transparent 46%),
-    linear-gradient(135deg, #7c5cff 0%, #4f46e5 45%, #22d3ee 100%);
+    linear-gradient(135deg, var(--sh-accent) 0%, #4f46e5 45%, var(--sh-accent-2) 100%);
   box-shadow: 0 12px 34px rgba(76, 70, 229, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   transition: transform 160ms ease, box-shadow 160ms ease;
   will-change: transform;
@@ -173,9 +173,14 @@
   display: grid;
   place-items: center;
   color: #fff;
-  background: linear-gradient(135deg, #7c5cff, #22d3ee);
+  background: linear-gradient(135deg, var(--sh-accent), var(--sh-accent-2));
   box-shadow: 0 6px 16px rgba(124, 92, 255, 0.35);
   flex: none;
+}
+
+.sh-logo svg,
+.sh-bubble__glyph {
+  stroke-width: 2.1;
 }
 
 .sh-brand__title {

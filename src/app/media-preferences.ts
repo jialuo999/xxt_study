@@ -1,4 +1,4 @@
-import { getSettings, subscribeSettings } from "@/core/settings-store";
+import { getSettings, refreshSettings, subscribeSettings } from "@/core/settings-store";
 import type { VideoSettings } from "@/core/settings";
 import { clamp } from "@/utils/async";
 
@@ -164,6 +164,8 @@ export function startMediaPreferences(): () => void {
   const onMediaReady = (event: Event) => {
     const target = event.target;
     if (!(target instanceof HTMLMediaElement)) return;
+    // 子 frame 可能刚收到顶层的倍速变更，先同步一次设置
+    refreshSettings();
     if (!initialized.has(target)) {
       applyToMedia(target, getSettings().video);
       return;
@@ -182,17 +184,32 @@ export function startMediaPreferences(): () => void {
     lastRateCheck = now;
     applyRate(target, rate);
   };
+  const lastRateFix = new WeakMap<HTMLMediaElement, number>();
+  const onRateChange = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLMediaElement)) return;
+    const rate = getSettings().video.playbackRate;
+    if (Math.abs(rate - 1) < 0.001) return;
+    if (Math.abs(target.playbackRate - rate) < 0.001) return;
+    const now = Date.now();
+    if (now - (lastRateFix.get(target) ?? 0) < 200) return;
+    lastRateFix.set(target, now);
+    // 播放器可能在 ratechange 里把倍速重置，立即补回
+    applyRate(target, rate);
+  };
   document.addEventListener("loadedmetadata", onMediaReady, true);
   document.addEventListener("canplay", onMediaReady, true);
   document.addEventListener("play", onMediaReady, true);
   document.addEventListener("timeupdate", onTimeUpdate, true);
+  document.addEventListener("ratechange", onRateChange, true);
 
-  // 学习通等播放器可能在播放中重置倍速，定时补回（仅非 1x）
-  const rateTimer = setInterval(() => {
+  // 定时同步跨 frame 设置；非 1x 时补回被播放器重置的倍速
+  const syncTimer = setInterval(() => {
+    refreshSettings();
     const rate = getSettings().video.playbackRate;
     if (Math.abs(rate - 1) < 0.001) return;
     for (const media of collectDocumentMedia()) applyRate(media, rate);
-  }, 2000);
+  }, 1500);
 
   const unsubscribe = subscribeSettings(() => {
     const next = { ...getSettings().video };
@@ -214,12 +231,13 @@ export function startMediaPreferences(): () => void {
 
   return () => {
     if (timer) clearTimeout(timer);
-    clearInterval(rateTimer);
+    clearInterval(syncTimer);
     observer.disconnect();
     document.removeEventListener("loadedmetadata", onMediaReady, true);
     document.removeEventListener("canplay", onMediaReady, true);
     document.removeEventListener("play", onMediaReady, true);
     document.removeEventListener("timeupdate", onTimeUpdate, true);
+    document.removeEventListener("ratechange", onRateChange, true);
     document.removeEventListener("volumechange", onVolumeChange, true);
     unsubscribe();
   };

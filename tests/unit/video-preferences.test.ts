@@ -4,7 +4,7 @@ import {
   collectMedia,
   startMediaPreferences,
 } from "../../src/app/media-preferences";
-import { DEFAULT_SETTINGS } from "../../src/core/settings";
+import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../../src/core/settings";
 import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 
 let stopPreferences: (() => void) | null = null;
@@ -189,5 +189,36 @@ describe("media-preferences", () => {
     updateSettings({ video: { defaultMuted: true } });
     await vi.advanceTimersByTimeAsync(10);
     expect(video.muted).toBe(true);
+  });
+
+  it("其他 frame 修改倍速后子 frame 轮询同步并生效", async () => {
+    vi.useFakeTimers();
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.playbackRate).toBe(1);
+
+    const external = structuredClone(DEFAULT_SETTINGS);
+    external.video.playbackRate = 2;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(external));
+
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(video.playbackRate).toBe(2);
+  });
+
+  it("播放器把倍速重置时通过 ratechange 立即补回", async () => {
+    vi.useFakeTimers();
+    updateSettings({ video: { playbackRate: 1.5 } });
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.playbackRate).toBe(1.5);
+
+    video.playbackRate = 1;
+    video.dispatchEvent(new Event("ratechange"));
+    expect(video.playbackRate).toBe(1.5);
   });
 });
