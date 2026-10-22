@@ -381,7 +381,7 @@ export function SettingsPage({ controller, state }: PageProps) {
           checked={settings.advanced.debug}
           onChange={(debug) => save({ advanced: { debug } })}
           label="调试模式"
-          description="在控制台输出更多日志，并暴露 window.__STUDY_HELPER__ 便于排查（仅本地）。"
+          description="输出更详细的日志，便于排查页面适配问题；不会暴露 API Key。"
         />
         <Field
           label="通用适配器 JSON"

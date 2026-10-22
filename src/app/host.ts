@@ -167,9 +167,6 @@ export class HostController implements UiController {
     this.frameSweepTimer = setInterval(() => this.sweepFrames(), 30000);
 
     this.patch({ ready: true, statusText: "待命" });
-    if (getSettings().advanced.debug) {
-      (window as unknown as { __STUDY_HELPER__?: HostController }).__STUDY_HELPER__ = this;
-    }
     this.toast("info", "学习助手已就绪，默认人工复核");
   }
 
