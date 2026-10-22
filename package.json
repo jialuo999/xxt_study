@@ -1,0 +1,28 @@
+{
+  "name": "study-helper",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "学习通自动翻页、题库与 AI 答题助手（Tampermonkey 用户脚本）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:sandbox": "tsc --noEmit && node --require ./tests/dom/tools/vite-sandbox-patch.cjs ./node_modules/vite/bin/vite.js build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:sandbox": "node --require ./tests/dom/tools/vite-sandbox-patch.cjs ./node_modules/vitest/vitest.mjs run --pool=threads",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "preact": "^11.0.1"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.5",
+    "jsdom": "^30.1.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vite-plugin-monkey": "^8.1.1",
+    "vitest": "^5.0.5"
+  }
+}

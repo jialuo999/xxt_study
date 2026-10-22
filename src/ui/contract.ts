@@ -1,0 +1,101 @@
+import type {
+  BankEntry,
+  PageInfo,
+  Question,
+  SolveResult,
+  SubmitResult,
+} from "@/core/types";
+import type { DeepPartial, Settings } from "@/core/settings";
+import type { LogEntry } from "@/core/logger";
+
+export type HostStatus =
+  | "idle"
+  | "scanning"
+  | "solving"
+  | "filling"
+  | "submitting"
+  | "error";
+
+export interface FrameSummary {
+  frameId: string;
+  url: string;
+  title: string;
+  pageKind: PageInfo["kind"];
+  questionCount: number;
+  isTop: boolean;
+}
+
+export interface AutoTurnView {
+  running: boolean;
+  steps: number;
+  maxSteps: number;
+  message: string;
+  nextAt: number | null;
+}
+
+export interface BankStatsView {
+  total: number;
+  lastUpdated: number | null;
+}
+
+export interface ImportResultView {
+  added: number;
+  skipped: number;
+  failed: number;
+  message: string;
+}
+
+export interface AiTestView {
+  ok: boolean;
+  message: string;
+  latencyMs?: number;
+  model?: string;
+}
+
+export interface ToastView {
+  id: number;
+  kind: "info" | "success" | "warn" | "error";
+  text: string;
+}
+
+export interface UiState {
+  ready: boolean;
+  page: PageInfo;
+  frames: FrameSummary[];
+  questions: Question[];
+  results: Record<string, SolveResult>;
+  status: HostStatus;
+  statusText: string;
+  progress: { done: number; total: number } | null;
+  autoTurn: AutoTurnView;
+  bank: BankStatsView;
+  settings: Settings;
+  logs: readonly LogEntry[];
+  lastSubmit: SubmitResult | null;
+  toast: ToastView | null;
+  noticeAccepted: boolean;
+}
+
+export interface UiController {
+  readonly state: UiState;
+  subscribe(listener: (state: UiState) => void): () => void;
+  init(): Promise<void>;
+  refresh(): Promise<void>;
+  solve(): Promise<void>;
+  fillAll(questionIds?: string[]): Promise<boolean>;
+  submit(): Promise<void>;
+  startAutoTurn(): void;
+  stopAutoTurn(): void;
+  importBankFile(file: File): Promise<ImportResultView>;
+  clearBank(): Promise<void>;
+  searchBank(query: string): Promise<BankEntry[]>;
+  exportBank(): Promise<string>;
+  testAi(): Promise<AiTestView>;
+  saveSettings(patch: DeepPartial<Settings>): void;
+  resetSettings(): void;
+  clearLogs(): void;
+  exportLogs(): string;
+  acceptNotice(): void;
+  setCollapsed(collapsed: boolean): void;
+  togglePanel(): void;
+}

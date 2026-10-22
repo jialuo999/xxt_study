@@ -1,0 +1,6 @@
+type,question,optionA,optionB,optionC,optionD,answer,source
+single,下列哪个是质数？,2,4,6,8,A,示例题库
+multiple,以下属于编程语言的有？,Python,HTML,Java,CSS,"A,C",示例题库
+judge,地球是圆的。,正确,错误,,,对,示例题库
+fill,中国的首都是____。,北京,,,,,北京,示例题库
+short,简述 HTTP 与 HTTPS 的主要区别。,,,,,HTTPS 在 HTTP 之下加入 TLS 加密与身份认证，默认端口为 443，能防止窃听与篡改。,示例题库

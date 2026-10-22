@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>学习助手 · 本地预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1b2233;
+        --muted: #6b7488;
+        --line: #e6e9f2;
+        --brand: #6c5ce7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(900px 480px at 8% -10%, rgba(108, 92, 231, 0.16), transparent 60%),
+          radial-gradient(700px 420px at 100% 0%, rgba(34, 211, 238, 0.14), transparent 55%),
+          #f6f7fb;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 18px 32px;
+        background: rgba(255, 255, 255, 0.78);
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(10px);
+      }
+      .logo {
+        width: 38px; height: 38px; border-radius: 12px;
+        background: linear-gradient(135deg, #6c5ce7, #22d3ee);
+        box-shadow: 0 8px 20px rgba(108, 92, 231, 0.3);
+      }
+      header h1 { font-size: 17px; margin: 0; }
+      header p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+      main { max-width: 860px; margin: 34px auto 80px; padding: 0 24px; }
+      .crumb { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+      .card {
+        background: #fff; border: 1px solid var(--line); border-radius: 18px;
+        box-shadow: 0 18px 50px rgba(31, 38, 60, 0.08);
+        padding: 26px 28px;
+      }
+      .card h2 { margin: 0 0 4px; font-size: 20px; }
+      .card .sub { margin: 0 0 20px; color: var(--muted); font-size: 12.5px; }
+      .TiMu {
+        border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 18px 14px; margin-bottom: 14px; background: #fcfcff;
+      }
+      .mark_name { font-size: 11px; color: var(--brand); font-weight: 700; margin-bottom: 7px; }
+      .Zy_TItle { font-size: 14.5px; line-height: 1.7; font-weight: 600; margin-bottom: 12px; }
+      .Zy_ulTk { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      .Zy_ulTk li {
+        display: flex; align-items: center; gap: 9px;
+        border: 1px solid var(--line); border-radius: 10px;
+        padding: 9px 11px; background: #fff; font-size: 13px;
+        cursor: pointer;
+      }
+      .Zy_ulTk li:hover { border-color: #cfc8ff; background: #faf9ff; }
+      .Zy_ulTk input { accent-color: var(--brand); }
+      .Actions { display: flex; gap: 10px; margin-top: 20px; }
+      button {
+        font: inherit; border-radius: 10px; padding: 9px 16px; cursor: pointer;
+        border: 1px solid var(--line); background: #fff; color: var(--ink); font-weight: 600;
+      }
+      button.primary {
+        color: #fff; border-color: transparent;
+        background: linear-gradient(135deg, #6c5ce7, #4f46e5 55%, #0ea5e9);
+        box-shadow: 0 10px 24px rgba(79, 70, 229, 0.28);
+      }
+      .toast {
+        position: fixed; right: 24px; bottom: 24px; background: #1b2233; color: #fff;
+        padding: 10px 14px; border-radius: 10px; font-size: 12px; opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="logo"></div>
+      <div>
+        <h1>学习通 · 模拟作业页</h1>
+        <p>Study Helper 本地 UI 预览（非真实平台）</p>
+      </div>
+    </header>
+    <main>
+      <div class="crumb">我的课程 / 数据结构 / 第 3 章测验</div>
+      <div class="card">
+        <h2>第 3 章 · 线性表</h2>
+        <p class="sub">共 4 题 · 建议 12 分钟 · 仅供界面预览</p>
+
+        <div class="TiMu">
+          <div class="mark_name">单选题（2 分）</div>
+          <div class="Zy_TItle">在顺序表中插入一个元素，平均需要移动多少个元素？</div>
+          <ul class="Zy_ulTk">
+            <li><input type="radio" name="q1" /> A. n</li>
+            <li><input type="radio" name="q1" /> B. n/2</li>
+            <li><input type="radio" name="q1" /> C. n+1</li>
+            <li><input type="radio" name="q1" /> D. 1</li>
+          </ul>
+        </div>
+
+        <div class="TiMu">
+          <div class="mark_name">多选题（2 分）</div>
+          <div class="Zy_TItle">以下哪些属于线性结构？</div>
+          <ul class="Zy_ulTk">
+            <li><input type="checkbox" name="q2" /> A. 数组</li>
+            <li><input type="checkbox" name="q2" /> B. 链表</li>
+            <li><input type="checkbox" name="q2" /> C. 二叉树</li>
+            <li><input type="checkbox" name="q2" /> D. 栈</li>
+          </ul>
+        </div>
+
+        <div class="TiMu">
+          <div class="mark_name">判断题（2 分）</div>
+          <div class="Zy_TItle">栈是一种先进先出的数据结构。</div>
+          <ul class="Zy_ulTk">
+            <li><input type="radio" name="q3" /> A. 正确</li>
+            <li><input type="radio" name="q3" /> B. 错误</li>
+          </ul>
+        </div>
+
+        <div class="TiMu">
+          <div class="mark_name">填空题（2 分）</div>
+          <div class="Zy_TItle">顺序表支持随机访问，时间复杂度为 ____。</div>
+          <ul class="Zy_ulTk">
+            <li><input type="text" placeholder="请输入答案" /></li>
+          </ul>
+        </div>
+
+        <div class="Actions">
+          <button class="primary" id="submit">提交作业</button>
+          <button id="next">下一节</button>
+        </div>
+      </div>
+    </main>
+    <div class="toast">本地预览 · 面板中的 AI/题库按钮不会发起真实请求</div>
+
+    <script>
+      // 打开面板、跳过首启提示，并配置通用适配器以识别这个本地模拟页
+      localStorage.setItem(
+        "study-helper.settings.v1",
+        JSON.stringify({
+          version: 1,
+          ui: { collapsed: false, x: 30, y: 80, width: 408, height: 620, theme: "light" },
+          advanced: {
+            debug: true,
+            genericConfig: {
+              name: "作业",
+              matches: ["dev/preview.html"],
+              questionContainer: ".TiMu",
+              stem: ".Zy_TItle",
+              options: ".Zy_ulTk li",
+              typeLabel: ".mark_name",
+              nextButton: "#next",
+              submitButton: "#submit"
+            }
+          }
+        })
+      );
+      localStorage.setItem("study-helper.notice.v1", "true");
+    </script>
+    <script src="../dist/study-helper.user.js"></script>
+  </body>
+</html>
