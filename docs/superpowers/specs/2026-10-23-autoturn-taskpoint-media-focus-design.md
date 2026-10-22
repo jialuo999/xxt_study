@@ -39,10 +39,11 @@
 - 主 frame `waitForMedia` 采用同样的锁存逻辑，并在判定完成后等待 1.2 秒再确认；
 - 跨 frame 的 `waitForExternalMedia` 要求 `allEnded` 稳定 1.5 秒，再翻页。
 
-### 2.2 已完成任务点跳过
+### 2.2 已完成任务点与旧媒体状态
 
-- 子 frame 检测 `.ans-job-icon` 的父级 `.ans-job-finished`，上报 `currentTaskFinished` / `allTasksFinished`；
-- Host 汇总后，自动翻页在任务点已完成时跳过媒体等待，直接进入翻页流程，避免平台自动重播；
+- 子 frame 检测 `.ans-job-icon` 的父级 `.ans-job-finished`，上报 `currentTaskFinished` / `allTasksFinished`，仅用于日志诊断。
+- **不直接用这些标志跳过媒体等待**：页面上可能同时存在知识卡片、视频等多个子 frame，其它 frame 的“已完成”容易被误当成当前任务点；实测旧实现会在 3 秒内连续跳过多个章节。
+- Host 在收到新的 frame `HELLO`（任务点/页面切换）时清空旧 `childMedia` 状态，避免上一页的 `allEnded` 让自动翻页误以为视频已结束；随后以新媒体上报 + 结束锁存为准。
 - `MediaState` 增加两个可选字段，旧消息/旧测试不受影响。
 
 ### 2.3 翻页必须“看得见变化”

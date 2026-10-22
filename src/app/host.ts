@@ -205,7 +205,7 @@ export class HostController implements UiController {
         void this.onNavigation();
       }
     }, 1200);
-    this.frameSweepTimer = setInterval(() => this.sweepFrames(), 30000);
+    this.frameSweepTimer = setInterval(() => this.sweepFrames(), 10000);
 
     this.patch({ ready: true, statusText: "待命" });
     this.toast("info", "学习助手已就绪，默认人工复核");
@@ -703,7 +703,12 @@ export class HostController implements UiController {
       case "HELLO": {
         const existing = this.children.get(message.frameId);
         // 同一 frame 重新加载时复用 token；不同来源冒用 frameId 时重新发 token
-        const token = existing && existing.source === source ? existing.token : createToken();
+        const sameSource = Boolean(existing && existing.source === source);
+        const token = sameSource ? existing!.token : createToken();
+        if (!sameSource) {
+          // 页面/任务点切换后，旧 frame 的媒体状态已经不可信，先清空等待新上报
+          this.childMedia.clear();
+        }
         this.children.set(message.frameId, {
           frameId: message.frameId,
           source,
@@ -711,7 +716,7 @@ export class HostController implements UiController {
           url: message.url,
           title: message.title,
           pageKind: message.pageKind,
-          questions: existing && existing.source === source ? existing.questions : [],
+          questions: sameSource ? existing!.questions : [],
           lastSeen: Date.now(),
         });
         sendToWindow(source, createMessage({ t: "WELCOME", token }));
@@ -918,7 +923,7 @@ export class HostController implements UiController {
       } catch {
         closed = false;
       }
-      if (closed || Date.now() - child.lastSeen > 5 * 60_000) {
+      if (closed || Date.now() - child.lastSeen > 60_000) {
         this.children.delete(frameId);
         this.childMedia.delete(frameId);
         changed = true;

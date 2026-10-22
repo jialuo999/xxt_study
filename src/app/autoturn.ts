@@ -123,11 +123,11 @@ export class AutoTurnRunner {
       }
     }
 
-    const taskFinished = Boolean(external?.currentTaskFinished || external?.allTasksFinished);
-    if (taskFinished) {
-      // 任务点已完成时平台可能仍自动重播，直接跳过等待去翻页
-      this.emit("当前任务点已完成，跳过等待", false);
-    } else if (settings.autoTurn.waitVideoEnd) {
+    if (external?.currentTaskFinished || external?.allTasksFinished) {
+      // 仅记录用于诊断；是否跳过仍以媒体状态为准，避免误把其它 frame 的完成状态当成当前任务点
+      logger.debug("autoturn", "子 frame 报告任务点已完成", external);
+    }
+    if (settings.autoTurn.waitVideoEnd) {
       this.emit("等待视频/音频播放结束…", false);
       if (external?.hasMedia) {
         const externalResult = await this.waitForExternalMedia(
@@ -296,9 +296,7 @@ export class AutoTurnRunner {
     while (Date.now() - started < timeoutMs) {
       if (!isAlive()) return "none";
       const state = this.host.getChildMediaState();
-      if (!state) return "none";
-      if (state.currentTaskFinished || state.allTasksFinished) return "done";
-      if (!state.hasMedia) return "none";
+      if (!state?.hasMedia) return "none";
       if (state.allEnded) {
         // 稳定 1.5 秒再确认，避免播放器结束瞬间自动切换分段/循环造成误判
         if (!endedSince) endedSince = Date.now();
