@@ -43,7 +43,7 @@ describe("waitForMedia", () => {
   it("暂停时自动恢复播放，并在结束后返回 done", async () => {
     const video = mockVideo({ playSucceeds: true });
     const promise = waitForMedia(document, 10000, () => true, preferences);
-    await vi.advanceTimersByTimeAsync(1500);
+    await vi.advanceTimersByTimeAsync(4000);
     await expect(promise).resolves.toBe("done");
     expect(video.play).toHaveBeenCalled();
   });
@@ -73,7 +73,37 @@ describe("waitForMedia", () => {
     expect(video.play).not.toHaveBeenCalled();
 
     finishMedia(video);
-    await vi.advanceTimersByTimeAsync(1500);
+    await vi.advanceTimersByTimeAsync(3000);
+    await expect(promise).resolves.toBe("done");
+  });
+
+  it("播放结束后播放器立即循环，也能识别为完成", async () => {
+    const video = document.createElement("video");
+    let paused = false;
+    let currentTime = 9.5;
+    let ended = false;
+    Object.defineProperty(video, "duration", { get: () => 10, configurable: true });
+    Object.defineProperty(video, "paused", { get: () => paused, configurable: true });
+    Object.defineProperty(video, "ended", { get: () => ended, configurable: true });
+    Object.defineProperty(video, "currentTime", {
+      get: () => currentTime,
+      configurable: true,
+    });
+    document.body.appendChild(video);
+
+    const promise = waitForMedia(document, 10000, () => true, {
+      ...preferences,
+      resumeOnPause: false,
+    });
+    // 播放到结尾，随后播放器立刻循环回 0（轮询时已经看不到结尾状态）
+    currentTime = 10;
+    ended = true;
+    video.dispatchEvent(new Event("ended"));
+    currentTime = 0;
+    ended = false;
+    paused = false;
+
+    await vi.advanceTimersByTimeAsync(3000);
     await expect(promise).resolves.toBe("done");
   });
 });

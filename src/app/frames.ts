@@ -23,14 +23,16 @@ export function findUiHost(): Window {
 
 export function frameId(): string {
   if (isTopFrame()) return "top";
-  const key = "study-helper.frameId";
+  // 每个 frame 有独立的 window/global；不能用 sessionStorage，否则同源嵌套 frame 会拿到同一个 id
+  const key = "__studyHelperFrameId";
+  const holder = window as unknown as Record<string, unknown>;
+  const existing = holder[key];
+  if (typeof existing === "string" && existing) return existing;
+  const next = `frame-${Math.random().toString(36).slice(2, 10)}`;
   try {
-    const existing = sessionStorage.getItem(key);
-    if (existing) return existing;
-    const next = `frame-${Math.random().toString(36).slice(2, 10)}`;
-    sessionStorage.setItem(key, next);
-    return next;
+    holder[key] = next;
   } catch {
-    return `frame-${Math.random().toString(36).slice(2, 10)}`;
+    /* ignore */
   }
+  return next;
 }

@@ -63,6 +63,10 @@ export interface MediaState {
   hasMedia: boolean;
   allEnded: boolean;
   anyPaused: boolean;
+  /** 当前任务点是否已完成（学习通 .ans-job-finished） */
+  currentTaskFinished?: boolean;
+  /** 当前页所有任务点是否都已完成 */
+  allTasksFinished?: boolean;
 }
 
 /** 页面信息 */

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyMediaPreferences,
   collectMedia,
+  focusMedia,
   startMediaPreferences,
 } from "../../src/app/media-preferences";
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../../src/core/settings";
@@ -98,6 +99,18 @@ describe("media-preferences", () => {
     expect(count).toBe(0);
     expect(video.muted).toBe(false);
     expect(collectMedia(document)).toContain(video);
+  });
+
+  it("focusMedia 会把焦点移到视频并派发鼠标事件", () => {
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+    const events: string[] = [];
+    video.addEventListener("mouseover", () => events.push("mouseover"));
+    video.addEventListener("mousemove", () => events.push("mousemove"));
+
+    focusMedia(video);
+    expect(document.activeElement).toBe(video);
+    expect(events).toEqual(["mouseover", "mousemove"]);
   });
 
   it("平台重置倍速后定时重新应用设置", async () => {

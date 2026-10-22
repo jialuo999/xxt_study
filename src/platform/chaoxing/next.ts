@@ -13,6 +13,15 @@ import { NEXT_SELECTORS, NEXT_TEXT_KEYWORDS } from "./selectors";
 
 const MAX_NEXT_TEXT_LENGTH = 12;
 
+/** 已经点击过但没有产生页面变化的元素，重试时跳过（10 秒后允许再次尝试） */
+const attemptedNext = new WeakMap<HTMLElement, number>();
+const ATTEMPT_TTL_MS = 10000;
+
+function wasAttempted(element: HTMLElement): boolean {
+  const at = attemptedNext.get(element);
+  return at !== undefined && Date.now() - at < ATTEMPT_TTL_MS;
+}
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -51,7 +60,9 @@ function clickAndReport(
   action: string,
   label: string,
 ): NextResult | null {
+  if (wasAttempted(element)) return null;
   if (!clickElement(element)) return null;
+  attemptedNext.set(element, Date.now());
   return {
     ok: true,
     action,
@@ -64,7 +75,7 @@ export async function nextPage(ctx: PageContext): Promise<NextResult> {
   try {
     for (const selector of NEXT_SELECTORS) {
       const element = queryFirst<HTMLElement>(ctx.doc, [selector]);
-      if (!element || !isActionable(element)) continue;
+      if (!element || !isActionable(element) || wasAttempted(element)) continue;
       const label = textOf(element).replace(/\s+/g, "") || selector;
       const result = clickAndReport(ctx, element, `click:${selector}`, label);
       if (result) return result;
@@ -72,6 +83,7 @@ export async function nextPage(ctx: PageContext): Promise<NextResult> {
 
     const candidates = queryAll<HTMLElement>(ctx.doc, ["a", "button", "span", "i", "div", "li"]);
     for (const element of candidates) {
+      if (wasAttempted(element)) continue;
       const text = textOf(element).replace(/\s+/g, "");
       if (!text || text.length > MAX_NEXT_TEXT_LENGTH) continue;
       if (!NEXT_TEXT_KEYWORDS.some((keyword) => text === keyword || text.includes(keyword))) continue;

@@ -69,6 +69,34 @@ function applyRate(media: HTMLMediaElement, rateValue: number): void {
 }
 
 /**
+ * 让播放器获得焦点并模拟一次鼠标移入。
+ * 部分平台播放器只有在视频区域获得焦点/鼠标悬停时才响应播放、倍速等操作。
+ */
+export function focusMedia(media: HTMLMediaElement): void {
+  try {
+    if (media.tabIndex < 0) media.tabIndex = 0;
+    media.focus({ preventScroll: true });
+  } catch {
+    try {
+      media.focus();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    const win = media.ownerDocument.defaultView;
+    if (!win) return;
+    media.dispatchEvent(new win.MouseEvent("mouseover", { bubbles: true }));
+    media.dispatchEvent(new win.MouseEvent("mouseenter", { bubbles: false }));
+    media.dispatchEvent(
+      new win.MouseEvent("mousemove", { bubbles: true, clientX: 1, clientY: 1 }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * 一次性强制应用静音与倍速（仅测试或显式调用；生产请用 startMediaPreferences）。
  * 注意：defaultMuted=false 时会强制取消静音，且 1x 也会写入倍速。
  */

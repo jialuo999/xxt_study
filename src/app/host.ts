@@ -55,6 +55,34 @@ import { AutoTurnRunner } from "./autoturn";
 
 const NOTICE_KEY = "study-helper.notice.v1";
 
+const TASK_URL_KEYS = [
+  "jobid",
+  "jobId",
+  "knowledgeId",
+  "knowledgeid",
+  "chapterId",
+  "chapterid",
+  "objectId",
+  "objectid",
+  "clazzid",
+  "clazzId",
+  "courseId",
+  "courseid",
+] as const;
+
+/** 去掉 _dc 等缓存参数，只保留能区分任务点的 URL 特征 */
+function taskUrlKey(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const search = TASK_URL_KEYS.filter((key) => url.searchParams.has(key))
+      .map((key) => `${key}=${url.searchParams.get(key)}`)
+      .join("&");
+    return `${url.origin}${url.pathname}${search ? `?${search}` : ""}`;
+  } catch {
+    return raw;
+  }
+}
+
 interface ChildFrame {
   frameId: string;
   source: Window;
@@ -135,6 +163,7 @@ export class HostController implements UiController {
       hasUnansweredQuestions: () => this.hasUnansweredQuestions(),
       getChildMediaState: () => this.getChildMediaState(),
       resumeChildMedia: () => this.resumeChildMedia(),
+      getTaskSignature: () => this.getTaskSignature(),
       onState: (autoTurn) => this.patch({ autoTurn }),
       onStopped: (reason) => {
         this.toast("info", reason);
@@ -821,15 +850,39 @@ export class HostController implements UiController {
 
   /** 汇总子 frame 的媒体状态，供自动翻页判断视频/音频是否结束 */
   getChildMediaState(): MediaState | null {
-    const fresh = [...this.childMedia.values()].filter(
-      (item) => Date.now() - item.at < 10000 && item.state.hasMedia,
-    );
+    const fresh = [...this.childMedia.values()].filter((item) => Date.now() - item.at < 10000);
     if (fresh.length === 0) return null;
+    const media = fresh.filter((item) => item.state.hasMedia);
+    const currentTaskFinished = fresh.some((item) => item.state.currentTaskFinished === true);
+    const allTasksFinished = fresh.some((item) => item.state.allTasksFinished === true);
+    if (media.length === 0 && !currentTaskFinished && !allTasksFinished) return null;
     return {
-      hasMedia: true,
-      allEnded: fresh.every((item) => item.state.allEnded),
-      anyPaused: fresh.some((item) => item.state.anyPaused),
+      hasMedia: media.length > 0,
+      allEnded: media.length > 0 && media.every((item) => item.state.allEnded),
+      anyPaused: media.some((item) => item.state.anyPaused),
+      currentTaskFinished,
+      allTasksFinished,
     };
+  }
+
+  /**
+   * 任务点签名：顶层 URL + 子 frame URL/类型 + 当前章节高亮文本。
+   * 学习通切换任务点时顶层 URL 往往不变，需要靠子 frame URL 判断是否真的翻页。
+   */
+  getTaskSignature(): string {
+    const frameKeys = this.state.frames.map(
+      (frame) => `${frame.pageKind}:${taskUrlKey(frame.url)}:${frame.title ?? ""}`,
+    );
+    const frames = [...new Set(frameKeys)].sort().join("|");
+    let current = "";
+    try {
+      current = (document.querySelector(".currents")?.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+    } catch {
+      /* ignore */
+    }
+    return `${taskUrlKey(location.href)}|${this.state.page.kind}|${current}|${frames}`;
   }
 
   /** 请求子 frame 恢复暂停的媒体播放 */

@@ -10,7 +10,7 @@ import { logger } from "@/core/logger";
 import { getAdapter } from "@/platform/registry";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { frameId as getFrameId } from "./frames";
-import { collectMedia } from "./media-preferences";
+import { collectMedia, focusMedia } from "./media-preferences";
 
 const UNKNOWN: PageInfo = {
   kind: "unknown",
@@ -35,6 +35,8 @@ export class FrameAgent {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private mediaTimer: ReturnType<typeof setInterval> | null = null;
   private mediaListener: (() => void) | null = null;
+  private mediaTimeListener: (() => void) | null = null;
+  private mediaFinishes = new WeakMap<HTMLMediaElement, { src: string; duration: number }>();
   private mutationTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
@@ -165,7 +167,95 @@ export class FrameAgent {
     document.addEventListener("pause", report, true);
     document.addEventListener("play", report, true);
     document.addEventListener("ended", report, true);
+    let lastTimeReport = 0;
+    this.mediaTimeListener = () => {
+      const now = Date.now();
+      if (now - lastTimeReport < 500) return;
+      lastTimeReport = now;
+      report();
+    };
+    document.addEventListener("timeupdate", this.mediaTimeListener, true);
     report();
+  }
+
+  private mediaSource(media: HTMLMediaElement): string {
+    try {
+      return media.currentSrc || media.src || "";
+    } catch {
+      return "";
+    }
+  }
+
+  private mediaDuration(media: HTMLMediaElement): number {
+    try {
+      return media.duration;
+    } catch {
+      return Number.NaN;
+    }
+  }
+
+  /** 记录“曾经播放到结尾”，避免播放器结束后立刻循环导致状态永远不是 ended */
+  private isMediaFinished(media: HTMLMediaElement): boolean {
+    const src = this.mediaSource(media);
+    const duration = this.mediaDuration(media);
+    const previous = this.mediaFinishes.get(media);
+    if (previous && (previous.src !== src || Math.abs(previous.duration - duration) > 1)) {
+      // 播放器切换到了新的视频/分段，重新等待
+      this.mediaFinishes.delete(media);
+    }
+    let nearEnd = false;
+    try {
+      nearEnd = duration > 0 && duration - media.currentTime <= 1;
+    } catch {
+      /* ignore */
+    }
+    let ended = false;
+    try {
+      ended = media.ended;
+    } catch {
+      /* ignore */
+    }
+    if (ended || nearEnd) this.mediaFinishes.set(media, { src, duration });
+    return this.mediaFinishes.has(media);
+  }
+
+  /** 学习通任务点完成状态（内容 frame 中 .ans-job-icon 的父级类名） */
+  private taskPointState(): { currentTaskFinished: boolean; allTasksFinished: boolean } {
+    const result = { currentTaskFinished: false, allTasksFinished: false };
+    try {
+      const icons = Array.from(document.querySelectorAll<HTMLElement>(".ans-job-icon"));
+      if (icons.length === 0) return result;
+      const items = icons
+        .map((icon) => icon.parentElement)
+        .filter((item): item is HTMLElement => Boolean(item));
+      if (items.length === 0) return result;
+      result.allTasksFinished = items.every((item) =>
+        item.classList.contains("ans-job-finished"),
+      );
+      for (const item of items) {
+        const iframe = item.querySelector("iframe");
+        if (!iframe) continue;
+        let visible = true;
+        try {
+          const rect = iframe.getBoundingClientRect();
+          visible = rect.width > 0 && rect.height > 0;
+        } catch {
+          /* ignore */
+        }
+        if (visible) {
+          const win = iframe.ownerDocument.defaultView;
+          const style = win?.getComputedStyle(iframe);
+          if (style && (style.display === "none" || style.visibility === "hidden")) visible = false;
+        }
+        if (visible && item.classList.contains("ans-job-finished")) {
+          result.currentTaskFinished = true;
+          break;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return result;
   }
 
   private reportMediaState(): void {
@@ -173,15 +263,7 @@ export class FrameAgent {
     try {
       const media = collectMedia(document);
       const hasMedia = media.length > 0;
-      const allEnded =
-        hasMedia &&
-        media.every((element) => {
-          try {
-            return element.ended || (element.duration > 0 && element.duration - element.currentTime <= 1);
-          } catch {
-            return true;
-          }
-        });
+      const allEnded = hasMedia && media.every((element) => this.isMediaFinished(element));
       const anyPaused = media.some((element) => {
         try {
           return element.paused && !element.ended;
@@ -189,13 +271,14 @@ export class FrameAgent {
           return false;
         }
       });
+      const taskState = this.taskPointState();
       sendToWindow(
         this.hostWindow,
         createMessage({
           t: "MEDIA_STATE",
           token: this.token,
           frameId: this.frameId,
-          state: { hasMedia, allEnded, anyPaused },
+          state: { hasMedia, allEnded, anyPaused, ...taskState },
         }),
       );
     } catch (error) {
@@ -209,6 +292,7 @@ export class FrameAgent {
     for (const media of collectMedia(document)) {
       try {
         if (media.paused && !media.ended) {
+          focusMedia(media);
           if (settings.video.defaultMuted) media.muted = true;
           await media.play();
         }
@@ -386,6 +470,10 @@ export class FrameAgent {
       document.removeEventListener("play", this.mediaListener, true);
       document.removeEventListener("ended", this.mediaListener, true);
       this.mediaListener = null;
+    }
+    if (this.mediaTimeListener) {
+      document.removeEventListener("timeupdate", this.mediaTimeListener, true);
+      this.mediaTimeListener = null;
     }
     window.removeEventListener("message", this.onMessage);
   }

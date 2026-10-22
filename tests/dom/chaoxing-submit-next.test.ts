@@ -132,6 +132,17 @@ describe("nextPage", () => {
     expect(result.action).toContain("text:下一章");
   });
 
+  it("重复尝试会跳过已点击且未产生变化的候选", async () => {
+    const ctx = makeContext(nextHtml, CHAPTER_URL);
+    const first = await chaoxingAdapter.nextPage!(ctx);
+    expect(first.ok).toBe(true);
+    expect(first.action).toContain("#prevNextFocusNext");
+
+    const second = await chaoxingAdapter.nextPage!(ctx);
+    expect(second.ok).toBe(true);
+    expect(second.action).toContain(".nextChapter");
+  });
+
   it("没有下一节时返回 ok:false", async () => {
     const ctx = makeContext("<div>没有导航</div>", CHAPTER_URL);
     const result = await chaoxingAdapter.nextPage!(ctx);
