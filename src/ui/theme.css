@@ -11,7 +11,7 @@
 .sh-root {
   --sh-accent: #7c5cff;
   --sh-accent-2: #22d3ee;
-  --sh-bg: rgba(15, 17, 24, 0.97);
+  --sh-bg: #0f1118;
   --sh-bg-solid: #0f1118;
   --sh-surface: rgba(255, 255, 255, 0.045);
   --sh-surface-hover: rgba(255, 255, 255, 0.08);
@@ -41,7 +41,7 @@
 }
 
 .sh-root[data-theme="light"] {
-  --sh-bg: rgba(250, 251, 255, 0.97);
+  --sh-bg: #fafbff;
   --sh-bg-solid: #f7f8fd;
   --sh-surface: rgba(15, 18, 32, 0.035);
   --sh-surface-hover: rgba(15, 18, 32, 0.065);
@@ -138,23 +138,8 @@
   border: 1px solid var(--sh-border);
   border-radius: 20px;
   box-shadow: var(--sh-shadow);
-  backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
   overflow: hidden;
   animation: sh-panel-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.sh-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(124, 92, 255, 0.5), rgba(34, 211, 238, 0.18) 42%, transparent 70%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 
 .sh-panel__header {
@@ -164,6 +149,7 @@
   padding: 14px 14px 10px;
   cursor: grab;
   user-select: none;
+  touch-action: none;
   flex: none;
 }
 

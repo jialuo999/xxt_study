@@ -1,20 +1,28 @@
-/** 选择 UI Host：最上层可访问（同源）的祖先窗口。 */
-export function findUiHost(): Window {
-  let current: Window = window;
-  while (current.parent && current.parent !== current) {
-    try {
-      // 访问 document 会在跨域时抛异常，从而停在当前层
-      void current.parent.document.documentElement;
-      current = current.parent;
-    } catch {
-      break;
-    }
+/**
+ * 顶层帧判定：只有真正的 top frame 挂载 UI。
+ *
+ * 学习通常见 mooc1.chaoxing.com 主页面 + mooc1-1.chaoxing.com 内容 iframe，
+ * 两者是不同 origin；如果按“同源祖先”判断，子 frame 会误以为自己也是 Host，
+ * 结果一个页面出现两个悬浮球。这里直接用跨域安全的 window.top 比较。
+ */
+export function isTopFrame(): boolean {
+  try {
+    return window.top === window;
+  } catch {
+    return false;
   }
-  return current;
+}
+
+export function findUiHost(): Window {
+  try {
+    return window.top ?? window;
+  } catch {
+    return window;
+  }
 }
 
 export function frameId(): string {
-  if (findUiHost() === window) return "top";
+  if (isTopFrame()) return "top";
   const key = "study-helper.frameId";
   try {
     const existing = sessionStorage.getItem(key);
@@ -24,14 +32,5 @@ export function frameId(): string {
     return next;
   } catch {
     return `frame-${Math.random().toString(36).slice(2, 10)}`;
-  }
-}
-
-export function isSameWindow(left: Window | null, right: Window): boolean {
-  if (!left) return false;
-  try {
-    return left === right;
-  } catch {
-    return false;
   }
 }

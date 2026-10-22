@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import {
   AI_PRESETS,
+  VIDEO_RATES,
   type DeepPartial,
   type Settings,
   type ThemeMode,
@@ -243,7 +244,7 @@ export function SettingsPage({ controller, state }: PageProps) {
         </div>
       </Card>
 
-      <Card title="自动翻页" hint="只操作页面按钮，不伪造视频进度">
+      <Card title="自动翻页与计划" hint="只操作页面按钮，不伪造学习进度">
         <Toggle
           checked={settings.autoTurn.enabled}
           onChange={(enabled) => save({ autoTurn: { enabled } })}
@@ -253,8 +254,8 @@ export function SettingsPage({ controller, state }: PageProps) {
         <Toggle
           checked={settings.autoTurn.waitVideoEnd}
           onChange={(waitVideoEnd) => save({ autoTurn: { waitVideoEnd } })}
-          label="等待视频播放结束"
-          description="监听 video 的 ended/进度，不修改平台数据。"
+          label="等待视频/音频结束"
+          description="播放结束后再翻页；无音视频时按下方的等待时间处理。"
         />
         <Toggle
           checked={settings.autoTurn.stopOnUnanswered}
@@ -262,6 +263,85 @@ export function SettingsPage({ controller, state }: PageProps) {
           label="遇到未答题目时暂停"
           description="避免把测验/作业直接翻过去。"
         />
+        <Toggle
+          checked={settings.autoTurn.autoStart}
+          onChange={(autoStart) => save({ autoTurn: { autoStart } })}
+          label="打开页面自动开始"
+          description="进入章节/视频页时直接开始，无需再点「开始翻页」。"
+        />
+        <Toggle
+          checked={settings.autoTurn.resumeOnReload}
+          onChange={(resumeOnReload) => save({ autoTurn: { resumeOnReload } })}
+          label="刷新/跳转后自动恢复"
+          description="恢复上次的步数；关闭后每次刷新都需要手动开始。"
+        />
+
+        <div class="sh-divider" style="margin:9px 0" />
+        <div class="sh-card__title" style="margin-bottom:2px">
+          开始 / 结束条件
+        </div>
+        <div class="sh-hint" style="margin-bottom:6px">
+          时间窗按本机时间；留空表示不限制。开始时间晚于结束时间视为跨午夜。
+        </div>
+        <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+          <Field label="每天开始时间">
+            <TextInput
+              type="time"
+              value={settings.autoTurn.dailyStart}
+              onBlur={(event) =>
+                save({ autoTurn: { dailyStart: event.currentTarget.value.trim() } })
+              }
+            />
+          </Field>
+          <Field label="每天结束时间">
+            <TextInput
+              type="time"
+              value={settings.autoTurn.dailyEnd}
+              onBlur={(event) =>
+                save({ autoTurn: { dailyEnd: event.currentTarget.value.trim() } })
+              }
+            />
+          </Field>
+        </div>
+        <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px">
+          <Field label="开始前延迟 (ms)" hint="点击开始后等待多久进入第一步。">
+            <TextInput
+              type="number"
+              min="0"
+              step="100"
+              value={settings.autoTurn.startDelayMs}
+              onBlur={(event) => {
+                const value = Number(event.currentTarget.value);
+                if (Number.isFinite(value)) save({ autoTurn: { startDelayMs: Math.max(0, value) } });
+              }}
+            />
+          </Field>
+          <Field label="最大运行时长 (分钟)" hint="0 表示不限制。">
+            <TextInput
+              type="number"
+              min="0"
+              step="5"
+              value={settings.autoTurn.maxRunMinutes}
+              onBlur={(event) => {
+                const value = Number(event.currentTarget.value);
+                if (Number.isFinite(value)) save({ autoTurn: { maxRunMinutes: Math.max(0, value) } });
+              }}
+            />
+          </Field>
+        </div>
+        <Field label="无音视频时等待 (ms)" hint="文档/PPT/阅读页没有媒体时，等待该时间再翻页。">
+          <TextInput
+            type="number"
+            min="0"
+            step="500"
+            value={settings.autoTurn.contentWaitMs}
+            onBlur={(event) => {
+              const value = Number(event.currentTarget.value);
+              if (Number.isFinite(value)) save({ autoTurn: { contentWaitMs: Math.max(0, value) } });
+            }}
+          />
+        </Field>
+
         <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px">
           <Field label="最小延迟 (ms)">
             <TextInput
@@ -300,6 +380,42 @@ export function SettingsPage({ controller, state }: PageProps) {
             }}
           />
         </Field>
+      </Card>
+
+      <Card title="视频 / 音频播放" hint="进入页面时应用；不会修改平台学习记录">
+        <Toggle
+          checked={settings.video.autoPlay}
+          onChange={(autoPlay) => save({ video: { autoPlay } })}
+          label="自动开始播放"
+          description="媒体初始处于暂停时尝试播放；被浏览器拦截会暂停翻页并提示。"
+        />
+        <Toggle
+          checked={settings.video.resumeOnPause}
+          onChange={(resumeOnPause) => save({ video: { resumeOnPause } })}
+          label="暂停后自动恢复"
+          description="播放中途暂停时尝试继续；不想被打断可关闭。"
+        />
+        <Toggle
+          checked={settings.video.defaultMuted}
+          onChange={(defaultMuted) => save({ video: { defaultMuted } })}
+          label="默认静音"
+          description="打开媒体时自动静音，可随时在播放器里取消。"
+        />
+        <Field label="默认倍速" hint="播放器支持时生效，1x 为原始速度。">
+          <Select
+            value={String(settings.video.playbackRate)}
+            onChange={(event) =>
+              save({ video: { playbackRate: Number(event.currentTarget.value) || 1 } })
+            }
+            options={VIDEO_RATES.map((rate) => ({
+              value: String(rate),
+              label: `${rate}x`,
+            }))}
+          />
+        </Field>
+        <div class="sh-hint" style="margin-top:6px">
+          只调整页面中 video / audio 元素的 muted 与 playbackRate，不伪造进度、不调用平台日志接口。
+        </div>
       </Card>
 
       <Card title="题库与缓存">

@@ -12,6 +12,8 @@ describe("settings-store", () => {
     expect(settings.solving.allowExam).toBe(false);
     expect(settings.ai.baseUrl).toContain("deepseek");
     expect(getSettings().bank.fuzzyThreshold).toBe(0.86);
+    expect(settings.video.defaultMuted).toBe(true);
+    expect(settings.video.playbackRate).toBe(1);
   });
 
   it("部分更新深度合并，不影响其他设置", () => {

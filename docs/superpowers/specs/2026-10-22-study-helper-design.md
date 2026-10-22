@@ -97,11 +97,17 @@ interface SolveResult {
 
 ## 6. 关键流程
 
-**自动翻页**：页面识别 → 恢复 session → 检查未答题目 → 等待视频结束 → 随机延迟 → 点击下一节 → 校验 URL → 循环；重复页面/达到最大步数/按钮失效时停止。
+**自动翻页**：页面识别 → 恢复 session → 检查未答题目 → 等待视频/音频结束 → 随机延迟 → 点击下一节 → 校验 URL → 循环；重复页面/达到最大步数/按钮失效时停止。支持每日开始/结束时间窗、开始前延迟、最大运行时长、打开页面自动开始、刷新恢复；无媒体内容时按配置等待。
+
+**媒体播放**：每个 frame 应用默认静音、倍速、自动播放与暂停恢复；跨 frame 通过 `MEDIA_STATE`/`RESUME_MEDIA` 汇总状态并请求恢复，视频/音频结束后才翻页。只调整 `muted`/`playbackRate`/`play()`，不伪造进度。
 
 **作业答题**：采集/子帧回报 → 去重 → 缓存 → 题库精确/模糊 → 远程 → AI → 置信度门禁 → 面板复核 → 按帧分组填入 → 回读校验 → 提交（可选自动确认）。
 
 **全自动**：仅在显式开启后生效；填完校验通过后提交；低置信度、验证码、页面异常、提交失败立即暂停。
+
+- 自动翻页：`autoTurn` 支持 `dailyStart/dailyEnd`、`startDelayMs`、`maxRunMinutes`、`autoStart`、`resumeOnReload`、`contentWaitMs`。
+- 视频/音频：`video` 支持 `defaultMuted`、`playbackRate`、`autoPlay`、`resumeOnPause`；只操作媒体元素。
+- 首页只允许 top frame 挂载 UI，子 frame 一律作为 agent，避免跨域 iframe 出现多个悬浮球。
 
 ## 7. 错误与边界
 

@@ -1,11 +1,14 @@
 import { getSettings } from "@/core/settings-store";
-import type { PageInfo } from "@/core/types";
+import type { VideoSettings } from "@/core/settings";
+import type { MediaState, PageInfo } from "@/core/types";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { jitter, sleep } from "@/utils/async";
 import { logger } from "@/core/logger";
 import type { AutoTurnView } from "@/ui/contract";
+import { collectMedia } from "./media-preferences";
 
 const SESSION_KEY = "study-helper.autoturn.v1";
+const MEDIA_WAIT_TIMEOUT = 45 * 60 * 1000;
 
 interface AutoTurnSession {
   running: boolean;
@@ -20,6 +23,8 @@ export interface AutoTurnHost {
   getContext(): PageContext | null;
   getPage(): PageInfo;
   hasUnansweredQuestions(): boolean;
+  getChildMediaState(): MediaState | null;
+  resumeChildMedia(): void;
   onState(state: AutoTurnView): void;
   onStopped(reason: string): void;
 }
@@ -40,33 +45,50 @@ export class AutoTurnRunner {
   /** 刷新后恢复上次运行 */
   restore(): void {
     const settings = getSettings();
-    if (!settings.autoTurn.enabled) {
+    if (!settings.autoTurn.enabled || !settings.autoTurn.resumeOnReload) {
       this.persist(false);
       return;
     }
     const session = readSession();
     if (!session?.running) return;
+    this.startedAt = session.startedAt || Date.now();
+    const scheduleError = this.scheduleError(settings);
+    if (scheduleError) {
+      this.persist(false);
+      this.emit(`未恢复：${scheduleError}`, true);
+      return;
+    }
     this.running = true;
     this.steps = session.steps;
     this.visited = session.visited ?? [];
-    this.startedAt = session.startedAt || Date.now();
     logger.info("autoturn", `恢复自动翻页（第 ${this.steps} 步）`);
     this.emit("已恢复自动翻页，即将继续");
-    setTimeout(() => void this.loop(), 1600);
+    setTimeout(() => void this.loop(), Math.max(800, settings.autoTurn.startDelayMs));
   }
 
   start(): void {
     if (this.running) return;
     const settings = getSettings();
     if (!settings.autoTurn.enabled) return;
+    this.startedAt = Date.now();
+    const scheduleError = this.scheduleError(settings);
+    if (scheduleError) {
+      this.running = false;
+      this.persist(false);
+      this.emit(scheduleError, true);
+      this.host.onStopped(scheduleError);
+      return;
+    }
     this.running = true;
     this.steps = 0;
-    this.startedAt = Date.now();
     this.visited = [];
     this.persist(true);
     logger.info("autoturn", "开始自动翻页");
-    this.emit("准备开始自动翻页");
-    void this.loop();
+    const delay = Math.max(0, settings.autoTurn.startDelayMs);
+    this.emit(delay ? `将在 ${Math.ceil(delay / 1000)} 秒后开始` : "准备开始自动翻页", false, Date.now() + delay);
+    setTimeout(() => {
+      if (this.running) void this.loop();
+    }, delay);
   }
 
   stop(reason = "已停止自动翻页"): void {
@@ -96,6 +118,11 @@ export class AutoTurnRunner {
       this.stop("当前页面不是章节/视频页，自动翻页已停止");
       return;
     }
+    const scheduleError = this.scheduleError(settings);
+    if (scheduleError) {
+      this.stop(scheduleError);
+      return;
+    }
     if (this.steps >= settings.autoTurn.maxSteps) {
       this.stop(`已达到最大步数（${settings.autoTurn.maxSteps}），已停止`);
       return;
@@ -106,23 +133,63 @@ export class AutoTurnRunner {
     }
 
     if (settings.autoTurn.waitVideoEnd) {
-      this.emit("等待视频播放结束…", false);
-      const result = await waitForVideo(document, 45 * 60 * 1000, () => this.running && token === this.loopToken);
-      if (!this.running || token !== this.loopToken) return;
-      if (result === "blocked") {
-        this.stop("视频未播放：请手动点击一次播放后再继续");
-        return;
+      this.emit("等待视频/音频播放结束…", false);
+      const external = this.host.getChildMediaState();
+      if (external?.hasMedia) {
+        const externalResult = await this.waitForExternalMedia(
+          45 * 60 * 1000,
+          () => this.running && token === this.loopToken,
+        );
+        if (!this.running || token !== this.loopToken) return;
+        if (externalResult === "blocked") {
+          this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+          return;
+        }
+        if (externalResult === "timeout") {
+          this.stop("等待视频/音频结束超时，已暂停");
+          return;
+        }
       }
-      if (result === "timeout") {
-        this.stop("等待视频结束超时，已暂停");
-        return;
+      const localMedia = findMedia(document);
+      if (!external?.hasMedia || localMedia.length > 0) {
+        const result = await waitForMedia(
+          document,
+          MEDIA_WAIT_TIMEOUT,
+          () => this.running && token === this.loopToken,
+          settings.video,
+        );
+        if (!this.running || token !== this.loopToken) return;
+        if (result === "blocked") {
+          this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+          return;
+        }
+        if (result === "timeout") {
+          this.stop("等待视频/音频结束超时，已暂停");
+          return;
+        }
+        if (result === "none" && settings.autoTurn.contentWaitMs > 0) {
+          const wait = Math.min(120000, Math.max(0, settings.autoTurn.contentWaitMs));
+          this.emit(`未检测到音视频，等待 ${Math.ceil(wait / 1000)} 秒后翻页`, false, Date.now() + wait);
+          await sleep(wait);
+          if (!this.running || token !== this.loopToken) return;
+        }
       }
     }
 
+    const afterWait = this.scheduleError(settings);
+    if (afterWait) {
+      this.stop(afterWait);
+      return;
+    }
     const delay = jitter(settings.autoTurn.minDelayMs, settings.autoTurn.maxDelayMs);
     this.emit(`${Math.max(1, Math.ceil(delay / 1000))} 秒后翻页`, false, Date.now() + delay);
     await sleep(delay);
     if (!this.running || token !== this.loopToken) return;
+    const afterDelay = this.scheduleError(settings);
+    if (afterDelay) {
+      this.stop(afterDelay);
+      return;
+    }
 
     const adapter = this.host.getAdapter();
     const context = this.host.getContext();
@@ -160,13 +227,52 @@ export class AutoTurnRunner {
     if (this.running && token === this.loopToken) void this.loop();
   }
 
+  private async waitForExternalMedia(
+    timeoutMs: number,
+    isAlive: () => boolean,
+  ): Promise<MediaWaitResult> {
+    const started = Date.now();
+    let pausedSince = 0;
+    while (Date.now() - started < timeoutMs) {
+      if (!isAlive()) return "none";
+      const state = this.host.getChildMediaState();
+      if (!state?.hasMedia) return "none";
+      if (state.allEnded) return "done";
+      if (state.anyPaused) {
+        if (!pausedSince) pausedSince = Date.now();
+        this.host.resumeChildMedia();
+        if (Date.now() - pausedSince > 6000) return "blocked";
+      } else {
+        pausedSince = 0;
+      }
+      await sleep(1000);
+    }
+    return "timeout";
+  }
+
+  private scheduleError(settings = getSettings()): string | null {    const { dailyStart, dailyEnd, maxRunMinutes } = settings.autoTurn;
+    if (dailyStart || dailyEnd) {
+      const now = new Date();
+      if (!isWithinDailyWindow(now, dailyStart, dailyEnd)) {
+        return `当前不在设定的翻页时间段（${dailyStart || "00:00"}–${dailyEnd || "24:00"}）`;
+      }
+    }
+    if (maxRunMinutes > 0 && this.startedAt > 0) {
+      const elapsedMinutes = (Date.now() - this.startedAt) / 60000;
+      if (elapsedMinutes >= maxRunMinutes) {
+        return `已达到最大运行时长（${maxRunMinutes} 分钟）`;
+      }
+    }
+    return null;
+  }
+
   private emit(message: string, stopped = false, nextAt: number | null = null): void {
     const settings = getSettings();
     this.host.onState({
       running: this.running,
       steps: this.steps,
       maxSteps: settings.autoTurn.maxSteps,
-      message: stopped && !this.running ? message : message,
+      message,
       nextAt,
     });
   }
@@ -197,67 +303,127 @@ function readSession(): AutoTurnSession | null {
   }
 }
 
-function findVideo(doc: Document, depth = 0): HTMLVideoElement | null {
-  const direct = doc.querySelector<HTMLVideoElement>("#video_html5_api, video");
-  if (direct) return direct;
-  if (depth >= 3) return null;
-  for (const iframe of Array.from(doc.querySelectorAll("iframe"))) {
-    try {
-      const childDoc = iframe.contentDocument;
-      if (childDoc) {
-        const found = findVideo(childDoc, depth + 1);
-        if (found) return found;
-      }
-    } catch {
-      /* cross-origin */
-    }
-  }
-  return null;
+/** 解析 "HH:mm"，非法返回 null */
+export function parseClock(value: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
 }
 
-export type VideoWaitResult = "done" | "none" | "blocked" | "timeout";
+/**
+ * 判断当前时间是否在每日时间窗内。
+ * 两端都为空视为全天；只填一端视为从该时刻起/到该时刻止；
+ * start > end 视为跨午夜（例如 23:00–06:00）。
+ */
+export function isWithinDailyWindow(now: Date, start: string, end: string): boolean {
+  const startMinutes = parseClock(start);
+  const endMinutes = parseClock(end);
+  if (startMinutes == null && endMinutes == null) return true;
+  const current = now.getHours() * 60 + now.getMinutes();
+  if (startMinutes != null && endMinutes == null) return current >= startMinutes;
+  if (startMinutes == null && endMinutes != null) return current < endMinutes;
+  if (startMinutes == null || endMinutes == null) return true;
+  if (startMinutes === endMinutes) return true;
+  if (startMinutes < endMinutes) return current >= startMinutes && current < endMinutes;
+  return current >= startMinutes || current < endMinutes;
+}
 
-export async function waitForVideo(
+export type MediaWaitResult = "done" | "none" | "blocked" | "timeout";
+
+function findMedia(doc: Document): HTMLMediaElement[] {
+  return collectMedia(doc);
+}
+
+/** 等待页面中的视频/音频播放结束；暂停时按设置尝试恢复播放 */
+export async function waitForMedia(
   doc: Document,
   timeoutMs: number,
   isAlive: () => boolean,
-): Promise<VideoWaitResult> {
-  let video = findVideo(doc);
-  if (!video && doc.querySelector("iframe")) {
-    // 章节页的 iframe 可能尚未加载完，给播放器一点出现时间
+  preferences: VideoSettings = getSettings().video,
+): Promise<MediaWaitResult> {
+  let media = findMedia(doc);
+  if (media.length === 0 && doc.querySelector("iframe")) {
+    // 章节页 iframe 可能尚未加载完，给播放器一点出现时间
     for (let attempt = 0; attempt < 10; attempt++) {
       if (!isAlive()) return "none";
       await sleep(500);
-      video = findVideo(doc);
-      if (video) break;
+      media = findMedia(doc);
+      if (media.length > 0) break;
     }
   }
-  if (!video) return "none";
-  if (video.ended || (video.duration > 0 && video.duration - video.currentTime <= 1)) {
-    return "done";
-  }
-
-  if (video.paused && video.currentTime < 1) {
-    try {
-      await video.play();
-    } catch {
-      /* autoplay may be blocked */
-    }
-  }
+  if (media.length === 0) return "none";
 
   const started = Date.now();
-  let blockedChecked = false;
+  const pausedSince = new Map<HTMLMediaElement, number>();
+  const lastAttempt = new Map<HTMLMediaElement, number>();
+
+  const allDone = () =>
+    media.every((element) => {
+      try {
+        return element.ended || (element.duration > 0 && element.duration - element.currentTime <= 1);
+      } catch {
+        return true;
+      }
+    });
+
+  const tryResume = async (element: HTMLMediaElement, now: number) => {
+    let paused = false;
+    try {
+      paused = element.paused;
+    } catch {
+      return;
+    }
+    if (!paused || allDone()) {
+      pausedSince.delete(element);
+      return;
+    }
+    const canResume = element.currentTime < 1 ? preferences.autoPlay : preferences.resumeOnPause;
+    if (!canResume) {
+      if (!pausedSince.has(element)) pausedSince.set(element, now);
+      return;
+    }
+    const last = lastAttempt.get(element) ?? 0;
+    if (now - last < 2000) return;
+    lastAttempt.set(element, now);
+    try {
+      // play() 可能因浏览器自动播放策略被拒绝；保持静音可显著提高成功率
+      if (preferences.defaultMuted) element.muted = true;
+      await element.play();
+    } catch {
+      /* 由下面的 blocked 判定处理 */
+    }
+  };
+
   while (Date.now() - started < timeoutMs) {
     if (!isAlive()) return "none";
-    if (video.ended || (video.duration > 0 && video.duration - video.currentTime <= 1)) {
-      return "done";
-    }
-    if (!blockedChecked && Date.now() - started > 3500) {
-      blockedChecked = true;
-      if (video.paused && video.currentTime < 1 && video.duration > 0) {
+    media = media.filter((element) => element.isConnected);
+    if (media.length === 0) return "none";
+    if (allDone()) return "done";
+
+    const now = Date.now();
+    for (const element of media) await tryResume(element, now);
+
+    for (const element of media) {
+      let paused = false;
+      try {
+        paused = element.paused;
+      } catch {
+        continue;
+      }
+      if (!paused) {
+        pausedSince.delete(element);
+        continue;
+      }
+      if (!pausedSince.has(element)) pausedSince.set(element, now);
+      const pausedFor = now - (pausedSince.get(element) ?? now);
+      if (pausedFor > 5000) {
         return "blocked";
       }
     }
+
     await sleep(1000);
   }
   return "timeout";

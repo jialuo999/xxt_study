@@ -10,6 +10,7 @@ import { logger } from "@/core/logger";
 import { getAdapter } from "@/platform/registry";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { frameId as getFrameId } from "./frames";
+import { collectMedia } from "./media-preferences";
 
 const UNKNOWN: PageInfo = {
   kind: "unknown",
@@ -32,6 +33,8 @@ export class FrameAgent {
   private helloAttempts = 0;
   private helloTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private mediaTimer: ReturnType<typeof setInterval> | null = null;
+  private mediaListener: (() => void) | null = null;
   private mutationTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
@@ -57,6 +60,7 @@ export class FrameAgent {
     }, 1500);
     setTimeout(() => this.collectAndSend(true), 600);
     this.observe();
+    this.startMediaReporter();
   }
 
   private detect(): boolean {
@@ -145,10 +149,75 @@ export class FrameAgent {
       case "NEXT":
         void this.handleNext();
         break;
+      case "RESUME_MEDIA":
+        void this.resumeMedia();
+        break;
       default:
         break;
     }
   };
+
+  private startMediaReporter(): void {
+    if (this.mediaTimer) return;
+    const report = () => this.reportMediaState();
+    this.mediaListener = report;
+    this.mediaTimer = setInterval(report, 2000);
+    document.addEventListener("pause", report, true);
+    document.addEventListener("play", report, true);
+    document.addEventListener("ended", report, true);
+    report();
+  }
+
+  private reportMediaState(): void {
+    if (!this.token || this.disposed) return;
+    try {
+      const media = collectMedia(document);
+      const hasMedia = media.length > 0;
+      const allEnded =
+        hasMedia &&
+        media.every((element) => {
+          try {
+            return element.ended || (element.duration > 0 && element.duration - element.currentTime <= 1);
+          } catch {
+            return true;
+          }
+        });
+      const anyPaused = media.some((element) => {
+        try {
+          return element.paused && !element.ended;
+        } catch {
+          return false;
+        }
+      });
+      sendToWindow(
+        this.hostWindow,
+        createMessage({
+          t: "MEDIA_STATE",
+          token: this.token,
+          frameId: this.frameId,
+          state: { hasMedia, allEnded, anyPaused },
+        }),
+      );
+    } catch (error) {
+      logger.debug("frame", "媒体状态上报失败", error);
+    }
+  }
+
+  private async resumeMedia(): Promise<void> {
+    const settings = getSettings();
+    if (!settings.video.autoPlay && !settings.video.resumeOnPause) return;
+    for (const media of collectMedia(document)) {
+      try {
+        if (media.paused && !media.ended) {
+          if (settings.video.defaultMuted) media.muted = true;
+          await media.play();
+        }
+      } catch {
+        /* 浏览器可能拒绝自动播放 */
+      }
+    }
+    this.reportMediaState();
+  }
 
   private collectAndSend(force = false): void {
     this.detect();
@@ -308,6 +377,16 @@ export class FrameAgent {
       this.heartbeatTimer = null;
     }
     if (this.mutationTimer) clearTimeout(this.mutationTimer);
+    if (this.mediaTimer) {
+      clearInterval(this.mediaTimer);
+      this.mediaTimer = null;
+    }
+    if (this.mediaListener) {
+      document.removeEventListener("pause", this.mediaListener, true);
+      document.removeEventListener("play", this.mediaListener, true);
+      document.removeEventListener("ended", this.mediaListener, true);
+      this.mediaListener = null;
+    }
     window.removeEventListener("message", this.onMessage);
   }
 }

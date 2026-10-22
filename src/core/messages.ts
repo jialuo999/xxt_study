@@ -1,4 +1,4 @@
-import type { AnswerValue, FillResult, PageKind, Question, SubmitResult } from "./types";
+import type { AnswerValue, FillResult, MediaState, PageKind, Question, SubmitResult } from "./types";
 
 export const MSG_MARK = "study-helper";
 export const MSG_VERSION = 1;
@@ -40,6 +40,8 @@ export type FrameMessage =
   | (BaseMessage & { t: "FILLED"; token: string; frameId: string; results: FillResult[] })
   | (BaseMessage & { t: "SUBMIT"; token: string; autoConfirm?: boolean })
   | (BaseMessage & { t: "SUBMIT_RESULT"; token: string; frameId: string; result: SubmitResult })
+  | (BaseMessage & { t: "MEDIA_STATE"; token: string; frameId: string; state: MediaState })
+  | (BaseMessage & { t: "RESUME_MEDIA"; token: string })
   | (BaseMessage & { t: "NEXT"; token: string })
   | (BaseMessage & { t: "COLLECT"; token: string })
   | (BaseMessage & { t: "PING"; token: string })

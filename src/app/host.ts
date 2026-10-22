@@ -1,6 +1,7 @@
 import type {
   BankEntry,
   FillResult,
+  MediaState,
   PageInfo,
   Question,
   SolveResult,
@@ -81,6 +82,7 @@ export class HostController implements UiController {
   private context: PageContext | null = null;
   private localQuestions: Question[] = [];
   private children = new Map<string, ChildFrame>();
+  private childMedia = new Map<string, { state: MediaState; at: number }>();
   private pendingFills = new Map<string, PendingFill>();
   private pendingSubmits = new Map<string, PendingSubmit>();
   private autoTurn: AutoTurnRunner;
@@ -123,6 +125,8 @@ export class HostController implements UiController {
       getContext: () => this.context,
       getPage: () => this.state.page,
       hasUnansweredQuestions: () => this.hasUnansweredQuestions(),
+      getChildMediaState: () => this.getChildMediaState(),
+      resumeChildMedia: () => this.resumeChildMedia(),
       onState: (autoTurn) => this.patch({ autoTurn }),
       onStopped: (reason) => {
         this.toast("info", reason);
@@ -156,7 +160,12 @@ export class HostController implements UiController {
 
     await this.initBankSafe();
     await this.refresh();
-    if (this.isAutoTurnPage()) this.autoTurn.restore();
+    if (this.isAutoTurnPage()) {
+      this.autoTurn.restore();
+      if (!this.autoTurn.isRunning && getSettings().autoTurn.autoStart && getSettings().autoTurn.enabled) {
+        this.autoTurn.start();
+      }
+    }
 
     this.urlTimer = setInterval(() => {
       if (location.href !== this.lastHref) {
@@ -403,7 +412,7 @@ export class HostController implements UiController {
       this.patch({ settings: getSettings() });
     }
     this.autoTurn.start();
-    this.toast("info", "自动翻页已开始");
+    if (this.autoTurn.isRunning) this.toast("info", "自动翻页已开始");
   }
 
   stopAutoTurn(): void {
@@ -709,6 +718,12 @@ export class HostController implements UiController {
         }
         break;
       }
+      case "MEDIA_STATE": {
+        const child = this.children.get(message.frameId);
+        if (!child || child.token !== message.token) return;
+        this.childMedia.set(message.frameId, { state: message.state, at: Date.now() });
+        break;
+      }
       case "SUBMIT_RESULT": {
         const child = this.children.get(message.frameId);
         if (!child || child.token !== message.token) return;
@@ -783,6 +798,28 @@ export class HostController implements UiController {
     });
   }
 
+  /** 汇总子 frame 的媒体状态，供自动翻页判断视频/音频是否结束 */
+  getChildMediaState(): MediaState | null {
+    const fresh = [...this.childMedia.values()].filter(
+      (item) => Date.now() - item.at < 10000 && item.state.hasMedia,
+    );
+    if (fresh.length === 0) return null;
+    return {
+      hasMedia: true,
+      allEnded: fresh.every((item) => item.state.allEnded),
+      anyPaused: fresh.some((item) => item.state.anyPaused),
+    };
+  }
+
+  /** 请求子 frame 恢复暂停的媒体播放 */
+  resumeChildMedia(): void {
+    for (const child of this.children.values()) {
+      const media = this.childMedia.get(child.frameId);
+      if (!media?.state.hasMedia) continue;
+      sendToWindow(child.source, createMessage({ t: "RESUME_MEDIA", token: child.token }));
+    }
+  }
+
   private async onNavigation(): Promise<void> {
     logger.info("nav", `页面跳转：${location.pathname}`);
     this.detectPage();
@@ -808,6 +845,7 @@ export class HostController implements UiController {
       }
       if (closed || Date.now() - child.lastSeen > 5 * 60_000) {
         this.children.delete(frameId);
+        this.childMedia.delete(frameId);
         changed = true;
       }
     }

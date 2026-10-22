@@ -25,7 +25,6 @@ export function App({ controller }: { controller: UiController }) {
   const [, forceTheme] = useState(0);
   const positionRef = useRef(position);
   positionRef.current = position;
-  const dragRef = useRef<{ moved: boolean } | null>(null);
 
   const collapsed = state.settings.ui.collapsed;
   const theme = resolveTheme(state);
@@ -69,32 +68,75 @@ export function App({ controller }: { controller: UiController }) {
     const startY = event.clientY;
     const origin = { ...positionRef.current };
     const drag = { moved: false };
-    dragRef.current = drag;
+    const dragElement =
+      mode === "bubble"
+        ? (event.currentTarget as HTMLElement)
+        : ((event.currentTarget as HTMLElement).closest(".sh-panel") as HTMLElement | null);
+    const maxX = Math.max(8, window.innerWidth - (mode === "panel" ? width : 60) - 8);
+    const maxY = Math.max(8, window.innerHeight - (mode === "panel" ? height : 60) - 8);
+    let lastDx = 0;
+    let lastDy = 0;
+    let raf = 0;
 
-    const onMove = (moveEvent: PointerEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-      setPosition({
-        x: clamp(origin.x + dx, 8, window.innerWidth - 60),
-        y: clamp(origin.y + dy, 8, window.innerHeight - 60),
-      });
+    if (dragElement) {
+      dragElement.style.willChange = "transform";
+      // 拖拽期间禁用 CSS transition，否则悬浮球/面板会“追着鼠标跑”
+      dragElement.style.transition = "none";
+    }
+    const applyTransform = () => {
+      raf = 0;
+      if (dragElement) {
+        dragElement.style.transform = `translate3d(${lastDx}px, ${lastDy}px, 0)`;
+      }
     };
 
-    const onUp = () => {
+    const onMove = (moveEvent: PointerEvent) => {
+      const dx = clamp(moveEvent.clientX - startX, 8 - origin.x, maxX - origin.x);
+      const dy = clamp(moveEvent.clientY - startY, 8 - origin.y, maxY - origin.y);
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      lastDx = dx;
+      lastDy = dy;
+      // 直接写 CSS transform，避免 pointermove 触发整棵 Preact 树重渲染
+      if (!raf) raf = requestAnimationFrame(applyTransform);
+    };
+
+    const finish = () => {
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      dragRef.current = null;
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      if (raf) cancelAnimationFrame(raf);
+      const finalPosition = {
+        x: clamp(origin.x + lastDx, 8, maxX),
+        y: clamp(origin.y + lastDy, 8, maxY),
+      };
       if (drag.moved) {
-        const latest = positionRef.current;
-        controller.saveSettings({ ui: { x: latest.x, y: latest.y } });
-      } else if (mode === "bubble") {
-        controller.setCollapsed(false);
+        setPosition(finalPosition);
+        controller.saveSettings({ ui: { x: finalPosition.x, y: finalPosition.y } });
+        // 等 Preact 用新的 left/top 渲染后再清除 transform，避免闪回
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            if (dragElement) {
+              dragElement.style.transform = "";
+              dragElement.style.willChange = "";
+              requestAnimationFrame(() => {
+                dragElement.style.transition = "";
+              });
+            }
+          }),
+        );
+      } else {
+        if (dragElement) {
+          dragElement.style.transform = "";
+          dragElement.style.willChange = "";
+          dragElement.style.transition = "";
+        }
+        if (mode === "bubble") controller.setCollapsed(false);
       }
     };
 
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
   };
 
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);

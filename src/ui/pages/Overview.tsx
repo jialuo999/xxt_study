@@ -104,7 +104,7 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
           <div class="sh-actions">
             {autoTurn.running ? (
               <Button size="sm" icon="pause" onClick={() => controller.stopAutoTurn()}>
-                暂停
+                结束翻页
               </Button>
             ) : (
               <Button

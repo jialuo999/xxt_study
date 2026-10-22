@@ -58,6 +58,13 @@ export interface SolveResult {
   costTokens?: number;
 }
 
+/** 媒体播放状态（跨 frame 汇总用） */
+export interface MediaState {
+  hasMedia: boolean;
+  allEnded: boolean;
+  anyPaused: boolean;
+}
+
 /** 页面信息 */
 export interface PageInfo {
   kind: PageKind;

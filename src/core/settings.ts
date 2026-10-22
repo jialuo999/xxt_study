@@ -40,6 +40,31 @@ export interface AutoTurnSettings {
   maxDelayMs: number;
   maxSteps: number;
   stopOnUnanswered: boolean;
+  /** 开始翻页前等待（毫秒） */
+  startDelayMs: number;
+  /** 单次运行最长分钟数；0 表示不限制 */
+  maxRunMinutes: number;
+  /** 每天开始时间 HH:mm；留空表示不限制 */
+  dailyStart: string;
+  /** 每天结束时间 HH:mm；留空表示不限制 */
+  dailyEnd: string;
+  /** 刷新/跳转后是否自动恢复 */
+  resumeOnReload: boolean;
+  /** 打开支持自动翻页的页面时自动开始 */
+  autoStart: boolean;
+  /** 页面没有 video/audio 时，等待多久再翻页（毫秒） */
+  contentWaitMs: number;
+}
+
+export interface VideoSettings {
+  /** 进入视频页时默认静音 */
+  defaultMuted: boolean;
+  /** 默认播放倍速；1 表示原始速度 */
+  playbackRate: number;
+  /** 媒体未播放时尝试自动播放 */
+  autoPlay: boolean;
+  /** 播放中途暂停时尝试恢复播放 */
+  resumeOnPause: boolean;
 }
 
 export interface SolvingSettings {
@@ -87,6 +112,7 @@ export interface Settings {
   version: 1;
   ui: UiSettings;
   autoTurn: AutoTurnSettings;
+  video: VideoSettings;
   solving: SolvingSettings;
   ai: AiSettings;
   bank: BankSettings;
@@ -118,6 +144,19 @@ export const DEFAULT_SETTINGS: Settings = {
     maxDelayMs: 5000,
     maxSteps: 200,
     stopOnUnanswered: true,
+    startDelayMs: 1500,
+    maxRunMinutes: 0,
+    dailyStart: "",
+    dailyEnd: "",
+    resumeOnReload: true,
+    autoStart: false,
+    contentWaitMs: 3000,
+  },
+  video: {
+    defaultMuted: true,
+    playbackRate: 1,
+    autoPlay: true,
+    resumeOnPause: true,
   },
   solving: {
     mode: "review",
@@ -193,3 +232,5 @@ export const AI_PRESETS: Array<{ label: string; baseUrl: string; model: string }
   { label: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3" },
   { label: "自定义", baseUrl: "", model: "" },
 ];
+
+export const VIDEO_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;
