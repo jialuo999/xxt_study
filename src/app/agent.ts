@@ -161,7 +161,7 @@ export class FrameAgent {
     if (this.mediaTimer) return;
     const report = () => this.reportMediaState();
     this.mediaListener = report;
-    this.mediaTimer = setInterval(report, 2000);
+    this.mediaTimer = setInterval(report, 1000);
     document.addEventListener("pause", report, true);
     document.addEventListener("play", report, true);
     document.addEventListener("ended", report, true);

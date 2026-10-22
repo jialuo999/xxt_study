@@ -87,6 +87,7 @@
     linear-gradient(135deg, #7c5cff 0%, #4f46e5 45%, #22d3ee 100%);
   box-shadow: 0 12px 34px rgba(76, 70, 229, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   transition: transform 160ms ease, box-shadow 160ms ease;
+  will-change: transform;
   touch-action: none;
   user-select: none;
 }
@@ -139,6 +140,7 @@
   border-radius: 20px;
   box-shadow: var(--sh-shadow);
   overflow: hidden;
+  will-change: transform;
   animation: sh-panel-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 

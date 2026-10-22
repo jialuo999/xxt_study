@@ -74,37 +74,59 @@ export function App({ controller }: { controller: UiController }) {
         : ((event.currentTarget as HTMLElement).closest(".sh-panel") as HTMLElement | null);
     const maxX = Math.max(8, window.innerWidth - (mode === "panel" ? width : 60) - 8);
     const maxY = Math.max(8, window.innerHeight - (mode === "panel" ? height : 60) - 8);
+    const pointerTarget = event.currentTarget as HTMLElement;
     let lastDx = 0;
     let lastDy = 0;
-    let raf = 0;
+
+    try {
+      pointerTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* ignore */
+    }
 
     if (dragElement) {
       dragElement.style.willChange = "transform";
-      // 拖拽期间禁用 CSS transition，否则悬浮球/面板会“追着鼠标跑”
       dragElement.style.transition = "none";
     }
-    const applyTransform = () => {
-      raf = 0;
-      if (dragElement) {
-        dragElement.style.transform = `translate3d(${lastDx}px, ${lastDy}px, 0)`;
-      }
-    };
 
-    const onMove = (moveEvent: PointerEvent) => {
+    const updateFromPointer = (moveEvent: PointerEvent) => {
       const dx = clamp(moveEvent.clientX - startX, 8 - origin.x, maxX - origin.x);
       const dy = clamp(moveEvent.clientY - startY, 8 - origin.y, maxY - origin.y);
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
       lastDx = dx;
       lastDy = dy;
-      // 直接写 CSS transform，避免 pointermove 触发整棵 Preact 树重渲染
-      if (!raf) raf = requestAnimationFrame(applyTransform);
+      if (dragElement) {
+        // 同步写 transform：不再等 rAF，快速移动时也不会落后一帧
+        dragElement.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+      }
     };
 
-    const finish = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-      if (raf) cancelAnimationFrame(raf);
+    const onMove = (moveEvent: PointerEvent) => {
+      // pointerrawupdate / getCoalescedEvents 能拿到更密集、更接近光标的点
+      try {
+        const coalesced = moveEvent.getCoalescedEvents?.();
+        if (coalesced && coalesced.length > 0) {
+          updateFromPointer(coalesced[coalesced.length - 1]);
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      updateFromPointer(moveEvent);
+    };
+
+    const finish = (upEvent?: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove as EventListener);
+      window.removeEventListener("pointerrawupdate", onMove as EventListener, true);
+      window.removeEventListener("pointerup", finish as EventListener);
+      window.removeEventListener("pointercancel", onCancel);
+      try {
+        pointerTarget.releasePointerCapture?.(event.pointerId);
+      } catch {
+        /* ignore */
+      }
+      if (upEvent) updateFromPointer(upEvent);
+
       const finalPosition = {
         x: clamp(origin.x + lastDx, 8, maxX),
         y: clamp(origin.y + lastDy, 8, maxY),
@@ -134,9 +156,13 @@ export function App({ controller }: { controller: UiController }) {
       }
     };
 
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
+    const onCancel = () => finish();
+    window.addEventListener("pointermove", onMove as EventListener);
+    if ("onpointerrawupdate" in window) {
+      window.addEventListener("pointerrawupdate", onMove as EventListener, true);
+    }
+    window.addEventListener("pointerup", finish as EventListener);
+    window.addEventListener("pointercancel", onCancel);
   };
 
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);

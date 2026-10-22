@@ -124,7 +124,7 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
             ref={fileRef}
             class="sh-file"
             type="file"
-            accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/plain"
+            accept=".json,.jsonl,.csv,.tsv,.txt,application/json,text/csv,text/plain"
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => void handleFiles(event.currentTarget.files)}
           />

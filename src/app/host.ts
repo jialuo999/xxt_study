@@ -31,7 +31,15 @@ import {
 } from "@/core/messages";
 import { getAdapter } from "@/platform/registry";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
-import { initBank, getBankStats, importBankText, clearBank, exportBank, searchBankByText } from "@/bank";
+import {
+  initBank,
+  getBankStats,
+  importBankText,
+  detectBankFormat,
+  clearBank,
+  exportBank,
+  searchBankByText,
+} from "@/bank";
 import { solveQuestions } from "@/solver";
 import { testAiConnection } from "@/ai";
 import { sleep } from "@/utils/async";
@@ -429,13 +437,16 @@ export class HostController implements UiController {
     }
     this.autoTurn.stop("页面已卸载");
     if (this.toastTimer) clearTimeout(this.toastTimer);
+    for (const pending of this.pendingFills.values()) clearTimeout(pending.timer);
+    for (const pending of this.pendingSubmits.values()) clearTimeout(pending.timer);
+    this.pendingFills.clear();
+    this.pendingSubmits.clear();
   }
 
   async importBankFile(file: File): Promise<ImportResultView> {
     try {
       const text = await file.text();
-      const ext = file.name.split(".").pop()?.toLowerCase();
-      const format = ext === "json" ? "json" : ext === "tsv" ? "tsv" : ext === "csv" ? "csv" : "txt";
+      const format = detectBankFormat(file.name);
       const result = await importBankText(text, format, file.name);
       await this.syncBankStats();
       const view: ImportResultView = {
@@ -662,7 +673,8 @@ export class HostController implements UiController {
     switch (message.t) {
       case "HELLO": {
         const existing = this.children.get(message.frameId);
-        const token = existing?.token ?? createToken();
+        // 同一 frame 重新加载时复用 token；不同来源冒用 frameId 时重新发 token
+        const token = existing && existing.source === source ? existing.token : createToken();
         this.children.set(message.frameId, {
           frameId: message.frameId,
           source,
@@ -670,7 +682,7 @@ export class HostController implements UiController {
           url: message.url,
           title: message.title,
           pageKind: message.pageKind,
-          questions: existing?.questions ?? [],
+          questions: existing && existing.source === source ? existing.questions : [],
           lastSeen: Date.now(),
         });
         sendToWindow(source, createMessage({ t: "WELCOME", token }));
@@ -716,7 +728,16 @@ export class HostController implements UiController {
       case "MEDIA_STATE": {
         const child = this.children.get(message.frameId);
         if (!child || child.token !== message.token) return;
-        this.childMedia.set(message.frameId, { state: message.state, at: Date.now() });
+        const state = message.state;
+        if (
+          !state ||
+          typeof state.hasMedia !== "boolean" ||
+          typeof state.allEnded !== "boolean" ||
+          typeof state.anyPaused !== "boolean"
+        ) {
+          return;
+        }
+        this.childMedia.set(message.frameId, { state, at: Date.now() });
         break;
       }
       case "SUBMIT_RESULT": {
@@ -752,6 +773,11 @@ export class HostController implements UiController {
 
   private waitForSubmit(frameId: string, timeoutMs: number): Promise<SubmitResult> {
     return new Promise((resolve) => {
+      const existing = this.pendingSubmits.get(frameId);
+      if (existing) {
+        clearTimeout(existing.timer);
+        existing.resolve({ ok: false, message: "新的提交请求已替换上一次请求" });
+      }
       const timer = setTimeout(() => {
         this.pendingSubmits.delete(frameId);
         resolve({ ok: false, message: "提交状态未知，请人工确认" });

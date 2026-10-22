@@ -111,7 +111,14 @@ export class AutoTurnRunner {
 
     if (settings.autoTurn.waitVideoEnd) {
       this.emit("等待视频/音频播放结束…", false);
-      const external = this.host.getChildMediaState();
+      let external = this.host.getChildMediaState();
+      if (!external?.hasMedia && document.querySelector("iframe")) {
+        // 跨域 iframe 的媒体状态由子 frame 上报，刚进入页面时可能还没到
+        external = await this.discoverChildMedia(
+          2000,
+          () => this.running && token === this.loopToken,
+        );
+      }
       if (external?.hasMedia) {
         const externalResult = await this.waitForExternalMedia(
           45 * 60 * 1000,
@@ -128,23 +135,42 @@ export class AutoTurnRunner {
         }
       }
       const localMedia = findMedia(document);
+      let localResult: MediaWaitResult = "done";
       if (!external?.hasMedia || localMedia.length > 0) {
-        const result = await waitForMedia(
+        localResult = await waitForMedia(
           document,
           MEDIA_WAIT_TIMEOUT,
           () => this.running && token === this.loopToken,
           settings.video,
         );
         if (!this.running || token !== this.loopToken) return;
-        if (result === "blocked") {
+        if (localResult === "blocked") {
           this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
           return;
         }
-        if (result === "timeout") {
+        if (localResult === "timeout") {
           this.stop("等待视频/音频结束超时，已暂停");
           return;
         }
-        if (result === "none" && settings.autoTurn.contentWaitMs > 0) {
+      }
+      if (localResult === "none") {
+        // 本地没找到媒体时，再给子 frame 一次上报机会
+        const lateExternal = this.host.getChildMediaState();
+        if (lateExternal?.hasMedia) {
+          const lateResult = await this.waitForExternalMedia(
+            45 * 60 * 1000,
+            () => this.running && token === this.loopToken,
+          );
+          if (!this.running || token !== this.loopToken) return;
+          if (lateResult === "blocked") {
+            this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+            return;
+          }
+          if (lateResult === "timeout") {
+            this.stop("等待视频/音频结束超时，已暂停");
+            return;
+          }
+        } else if (settings.autoTurn.contentWaitMs > 0) {
           const wait = Math.min(120000, Math.max(0, settings.autoTurn.contentWaitMs));
           this.emit(`未检测到音视频，等待 ${Math.ceil(wait / 1000)} 秒后翻页`, false, Date.now() + wait);
           await sleep(wait);
@@ -192,6 +218,21 @@ export class AutoTurnRunner {
 
     await sleep(1400);
     if (this.running && token === this.loopToken) void this.loop();
+  }
+
+  private async discoverChildMedia(
+    timeoutMs: number,
+    isAlive: () => boolean,
+  ): Promise<MediaState | null> {
+    const started = Date.now();
+    let latest: MediaState | null = null;
+    while (Date.now() - started < timeoutMs) {
+      if (!isAlive()) return latest;
+      latest = this.host.getChildMediaState();
+      if (latest?.hasMedia) return latest;
+      await sleep(500);
+    }
+    return this.host.getChildMediaState();
   }
 
   private async waitForExternalMedia(

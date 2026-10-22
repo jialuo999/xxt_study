@@ -111,7 +111,7 @@ export function OverviewPage({ controller, state, onNavigate }: PageProps) {
                 size="sm"
                 variant="primary"
                 icon="play"
-                disabled={!page.supported || state.status === "submitting"}
+                disabled={!page.supported || busy}
                 onClick={() => controller.startAutoTurn()}
               >
                 开始翻页
