@@ -28,6 +28,8 @@ export default defineConfig({
           "GM_xmlhttpRequest",
           "GM_registerMenuCommand",
           "GM_notification",
+          "GM_addValueChangeListener",
+          "GM_removeValueChangeListener",
           "unsafeWindow",
         ],
         connect: ["*"],

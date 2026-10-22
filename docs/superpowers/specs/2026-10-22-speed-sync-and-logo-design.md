@@ -25,8 +25,9 @@
 
 ### 3.1 跨 frame 设置同步
 
-- `settings-store` 新增 `refreshSettings()`：从 GM 存储重新读取设置，与缓存比较，有变化时更新缓存并通知订阅者；读取失败/空值不覆盖当前缓存。
-- 媒体偏好模块每 1.5 秒调用一次 `refreshSettings()`，并在 `loadedmetadata/canplay/play` 时再同步一次；子 frame 由此拿到顶层写入的 `playbackRate` / `defaultMuted`。
+- `settings-store` 新增 `refreshSettings()`：从 GM 存储重新读取设置，与缓存比较，有变化时更新缓存并通知订阅者；读取失败/空值/非对象不覆盖当前缓存，本地写入失败时也不被旧存储回滚。
+- 新增 `startExternalSettingsSync()`：通过 `GM_addValueChangeListener` 监听 `SETTINGS_KEY`，其他 frame/tab 写入时立即同步。`vite.config.ts` 增加 `GM_addValueChangeListener` / `GM_removeValueChangeListener` 授权。
+- 媒体偏好模块同时保留 1.5 秒轮询作为兜底（用户脚本管理器不提供监听、或开发环境下 localStorage 同源共享时仍可工作）。
 - GM 存储在 Tampermonkey 内跨 frame 共享；开发预览使用 localStorage 同源共享。
 
 ### 3.2 播放器重置倍速
@@ -38,11 +39,11 @@
 
 - 新增 `bookOpen` 图标（打开的书本轮廓），替换顶部品牌 Logo 与悬浮球的 `spark` 图标。
 - Logo 容器继续使用强调色渐变：`var(--sh-accent)` → `var(--sh-accent-2)`；悬浮球渐变也改为强调色变量，保证与主题强调色一致。
-- 书本描边在 Logo 内加粗到 2.1，贴近参考图的厚重图标风格。
+- 书本描边在 Logo 内加粗到 2.1，并加轻微 drop-shadow，改善白描边在渐变青端的对比度，贴近参考图的厚重图标风格。
 
 ## 5. 验证
 
-- `settings-store` 测试：外部写入 GM 存储后 `refreshSettings()` 能同步，无变化时不重复通知。
-- 媒体测试：外层 frame 写入倍速后，子 frame 轮询在 1.5s 内生效；播放器重置倍速时 `ratechange` 立即补回。
+- `settings-store` 测试：外部写入 GM 存储后 `refreshSettings()` 能同步；无变化时不重复通知；有 `GM_addValueChangeListener` 时立即同步；本地写入失败时不被旧存储回滚。
+- 媒体测试：外层 frame 写入倍速后，子 frame 轮询在 1.5s 内生效；默认静音跨 frame 同步且尊重手动静音；播放器重置倍速时 `ratechange` 立即补回。
 - 既有测试保持通过（媒体、拖动、设置合并）。
 - 截图核对新 Logo 与设置页无冗余注释。

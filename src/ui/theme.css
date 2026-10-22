@@ -175,6 +175,7 @@
   color: #fff;
   background: linear-gradient(135deg, var(--sh-accent), var(--sh-accent-2));
   box-shadow: 0 6px 16px rgba(124, 92, 255, 0.35);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
   flex: none;
 }
 

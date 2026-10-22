@@ -5,7 +5,7 @@ import {
   startMediaPreferences,
 } from "../../src/app/media-preferences";
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../../src/core/settings";
-import { replaceSettings, updateSettings } from "../../src/core/settings-store";
+import { getSettings, replaceSettings, updateSettings } from "../../src/core/settings-store";
 
 let stopPreferences: (() => void) | null = null;
 
@@ -205,6 +205,28 @@ describe("media-preferences", () => {
 
     await vi.advanceTimersByTimeAsync(1600);
     expect(video.playbackRate).toBe(2);
+  });
+
+  it("其他 frame 修改默认静音后子 frame 同步且尊重手动静音", async () => {
+    vi.useFakeTimers();
+    updateSettings({ video: { defaultMuted: true } });
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.muted).toBe(true);
+
+    const external = structuredClone(DEFAULT_SETTINGS);
+    external.video.defaultMuted = false;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(external));
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(getSettings().video.defaultMuted).toBe(false);
+
+    video.muted = false;
+    video.dispatchEvent(new Event("volumechange"));
+    video.dispatchEvent(new Event("play"));
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(video.muted).toBe(false);
   });
 
   it("播放器把倍速重置时通过 ratechange 立即补回", async () => {

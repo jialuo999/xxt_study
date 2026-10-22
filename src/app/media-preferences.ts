@@ -1,4 +1,9 @@
-import { getSettings, refreshSettings, subscribeSettings } from "@/core/settings-store";
+import {
+  getSettings,
+  refreshSettings,
+  startExternalSettingsSync,
+  subscribeSettings,
+} from "@/core/settings-store";
 import type { VideoSettings } from "@/core/settings";
 import { clamp } from "@/utils/async";
 
@@ -211,6 +216,9 @@ export function startMediaPreferences(): () => void {
     for (const media of collectDocumentMedia()) applyRate(media, rate);
   }, 1500);
 
+  // GM 存储支持时立即收到其他 frame 的设置变更；轮询作为不支持时的兜底
+  const stopExternalSync = startExternalSettingsSync();
+
   const unsubscribe = subscribeSettings(() => {
     const next = { ...getSettings().video };
     const rateChanged = Math.abs(next.playbackRate - lastVideo.playbackRate) > 0.001;
@@ -239,6 +247,7 @@ export function startMediaPreferences(): () => void {
     document.removeEventListener("timeupdate", onTimeUpdate, true);
     document.removeEventListener("ratechange", onRateChange, true);
     document.removeEventListener("volumechange", onVolumeChange, true);
+    stopExternalSync();
     unsubscribe();
   };
 }

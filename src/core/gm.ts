@@ -23,21 +23,57 @@ export function gmGet<T>(key: string, fallback: T): T {
   }
 }
 
-export function gmSet<T>(key: string, value: T): void {
+export function gmSet<T>(key: string, value: T): boolean {
   const fn = g.GM_setValue as ((k: string, v: T) => void) | undefined;
   if (typeof fn === "function") {
     try {
       fn(key, value);
-      return;
+      return true;
     } catch {
       /* fall through */
     }
   }
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    /* ignore quota errors */
+    return false;
   }
+}
+
+/**
+ * 监听 GM 存储变更（跨 frame/tab）。
+ * 返回取消监听的函数；环境不支持时返回 no-op。
+ */
+export function gmAddValueChangeListener(
+  key: string,
+  onChange: (newValue: unknown, remote: boolean) => void,
+): () => void {
+  const add = g.GM_addValueChangeListener as
+    | ((
+        name: string,
+        callback: (name: string, oldValue: unknown, newValue: unknown, remote: boolean) => void,
+      ) => number)
+    | undefined;
+  if (typeof add !== "function") return () => undefined;
+
+  let listenerId: number | undefined;
+  try {
+    listenerId = add(key, (_name, _oldValue, newValue, remote) => onChange(newValue, remote));
+  } catch {
+    return () => undefined;
+  }
+
+  return () => {
+    const remove = g.GM_removeValueChangeListener as ((id: number) => void) | undefined;
+    if (typeof remove === "function" && typeof listenerId === "number") {
+      try {
+        remove(listenerId);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 }
 
 export interface GmRequestOptions {

@@ -1,8 +1,10 @@
-import { gmGet, gmSet } from "./gm";
+import { gmAddValueChangeListener, gmGet, gmSet } from "./gm";
+import { logger } from "./logger";
 import { DEFAULT_SETTINGS, SETTINGS_KEY, type DeepPartial, type Settings } from "./settings";
 
 const listeners = new Set<(settings: Settings) => void>();
 let cached: Settings | null = null;
+let lastPersisted = true;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -68,9 +70,23 @@ function settingsEqual(a: Settings, b: Settings): boolean {
  */
 export function refreshSettings(): Settings {
   const current = getSettings();
-  const raw = gmGet<unknown>(SETTINGS_KEY, null);
+  // 本地写入失败时不能用存储里的旧值回滚刚更新的缓存
+  if (!lastPersisted) return current;
+
+  let raw = gmGet<unknown>(SETTINGS_KEY, null);
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw) as unknown;
+    } catch {
+      logger.debug("settings", "忽略无法解析的存储值");
+      return current;
+    }
+  }
   // 读取失败或存储被清空时保持当前缓存，避免瞬时的空值把设置重置为默认
-  if (!isPlainObject(raw)) return current;
+  if (!isPlainObject(raw)) {
+    logger.debug("settings", "忽略非对象的存储值");
+    return current;
+  }
   const next = normalize(raw);
   if (settingsEqual(next, current)) return current;
   cached = next;
@@ -78,17 +94,29 @@ export function refreshSettings(): Settings {
   return next;
 }
 
+/** 监听其他 frame/tab 的设置变更（GM 存储支持时立即同步，否则由媒体模块轮询兜底） */
+export function startExternalSettingsSync(): () => void {
+  return gmAddValueChangeListener(SETTINGS_KEY, () => {
+    refreshSettings();
+  });
+}
+
+function persist(settings: Settings): void {
+  lastPersisted = gmSet(SETTINGS_KEY, settings);
+  if (!lastPersisted) logger.warn("settings", "设置写入失败，已仅保存在内存");
+}
+
 export function updateSettings(patch: DeepPartial<Settings>): Settings {
   const next = normalize(merge(getSettings(), patch));
   cached = next;
-  gmSet(SETTINGS_KEY, next);
+  persist(next);
   emit(next);
   return next;
 }
 
 export function replaceSettings(next: Settings): Settings {
   cached = normalize(next);
-  gmSet(SETTINGS_KEY, cached);
+  persist(cached);
   emit(cached);
   return cached;
 }

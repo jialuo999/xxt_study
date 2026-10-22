@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../../src/core/settings";
 import {
   getSettings,
   refreshSettings,
   replaceSettings,
+  startExternalSettingsSync,
+  subscribeSettings,
   updateSettings,
 } from "../../src/core/settings-store";
 
@@ -66,5 +68,63 @@ describe("settings-store", () => {
     expect(getSettings().video.playbackRate).toBe(1.75);
     // 无变化时返回同一缓存对象，不重复通知
     expect(refreshSettings()).toBe(refreshed);
+  });
+
+  it("refreshSettings 只在有变化时通知订阅者", () => {
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    const listener = vi.fn();
+    const unsubscribe = subscribeSettings(listener);
+    refreshSettings();
+    expect(listener).not.toHaveBeenCalled();
+
+    const external = structuredClone(DEFAULT_SETTINGS);
+    external.video.playbackRate = 1.25;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(external));
+    refreshSettings();
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("本地写入失败时 refreshSettings 不用旧存储回滚", () => {
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    try {
+      const next = updateSettings({ video: { playbackRate: 1.5 } });
+      expect(next.video.playbackRate).toBe(1.5);
+      expect(refreshSettings().video.playbackRate).toBe(1.5);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("有 GM_addValueChangeListener 时外部变更立即同步", () => {
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const callbacks: Array<(...args: unknown[]) => void> = [];
+    const remove = vi.fn();
+    globals.GM_addValueChangeListener = (
+      _name: string,
+      callback: (...args: unknown[]) => void,
+    ) => {
+      callbacks.push(callback);
+      return 7;
+    };
+    globals.GM_removeValueChangeListener = remove;
+
+    try {
+      const stop = startExternalSettingsSync();
+      const external = structuredClone(DEFAULT_SETTINGS);
+      external.video.playbackRate = 1.75;
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(external));
+      callbacks[0]?.(SETTINGS_KEY, DEFAULT_SETTINGS, external, true);
+      expect(getSettings().video.playbackRate).toBe(1.75);
+      stop();
+      expect(remove).toHaveBeenCalledWith(7);
+    } finally {
+      delete globals.GM_addValueChangeListener;
+      delete globals.GM_removeValueChangeListener;
+    }
   });
 });
