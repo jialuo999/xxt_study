@@ -95,7 +95,7 @@ export function SolvePage({ controller, state }: PageProps) {
         <EmptyState
           icon="scan"
           title="还没有采集到题目"
-          description="打开作业/章节测验页面后点击扫描；若仍为空，可能是页面结构变化，请在日志中查看诊断。"
+          description="打开作业/章节测验页面后点击扫描；若仍为空，可能是页面结构变化，请在 设置 → 运行日志 中查看诊断。"
           action={
             <Button size="sm" icon="refresh" disabled={busy} onClick={() => void controller.refresh()}>
               重新扫描

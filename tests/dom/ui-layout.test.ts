@@ -78,6 +78,22 @@ describe("导航与主页布局", () => {
     expect(rate).not.toBeNull();
     expect(rate?.value).toBe("1");
   });
+
+  it("从主页进入翻页设置时先展开对应板块再跳转", () => {
+    const state = makeState();
+    const { controller, saveSettings } = makeController(state);
+    const onNavigate = vi.fn();
+    const container = mount(h(HomePage, { controller, state, onNavigate }));
+
+    const settingsButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "翻页设置",
+    );
+    expect(settingsButton).toBeDefined();
+    settingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { autoTurn: true } } });
+    expect(onNavigate).toHaveBeenCalledWith("settings");
+  });
 });
 
 describe("设置页折叠板块", () => {
