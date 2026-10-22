@@ -1,11 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyMediaPreferences, startMediaPreferences } from "../../src/app/media-preferences";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 
+let stopPreferences: (() => void) | null = null;
+
 describe("media-preferences", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+  });
+
+  afterEach(() => {
+    stopPreferences?.();
+    stopPreferences = null;
+    vi.useRealTimers();
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
   });
 
   it("应用默认静音与倍速到页面中的 video/audio", () => {
@@ -70,9 +80,8 @@ describe("media-preferences", () => {
 
   it("平台重置倍速后定时重新应用设置", async () => {
     vi.useFakeTimers();
-    replaceSettings(structuredClone(DEFAULT_SETTINGS));
     updateSettings({ video: { playbackRate: 1.5 } });
-    const stop = startMediaPreferences();
+    stopPreferences = startMediaPreferences();
     const video = document.createElement("video");
     document.body.appendChild(video);
     await vi.advanceTimersByTimeAsync(300);
@@ -80,8 +89,83 @@ describe("media-preferences", () => {
     video.playbackRate = 1; // 模拟平台播放器重置
     await vi.advanceTimersByTimeAsync(2500);
     expect(video.playbackRate).toBe(1.5);
-    stop();
-    replaceSettings(structuredClone(DEFAULT_SETTINGS));
-    vi.useRealTimers();
+  });
+
+  it("关闭默认静音后不覆盖用户手动静音状态", async () => {
+    vi.useFakeTimers();
+    updateSettings({ video: { defaultMuted: false } });
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    video.muted = true;
+    document.body.appendChild(video);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.muted).toBe(true);
+
+    video.dispatchEvent(new Event("play"));
+    video.dispatchEvent(new Event("canplay"));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.muted).toBe(true);
+
+    // 普通设置变更不应重置媒体状态
+    updateSettings({ ui: { theme: "dark" } });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(video.muted).toBe(true);
+  });
+
+  it("默认静音开启时用户取消静音后不再强制静音", async () => {
+    vi.useFakeTimers();
+    updateSettings({ video: { defaultMuted: true } });
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.muted).toBe(true);
+
+    video.muted = false;
+    video.dispatchEvent(new Event("volumechange"));
+    video.dispatchEvent(new Event("play"));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.muted).toBe(false);
+
+    updateSettings({ ui: { theme: "light" } });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(video.muted).toBe(false);
+  });
+
+  it("默认 1x 时不覆盖播放器内手动调整的倍速", async () => {
+    vi.useFakeTimers();
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.playbackRate).toBe(1);
+
+    video.playbackRate = 1.75;
+    video.dispatchEvent(new Event("play"));
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(video.playbackRate).toBe(1.75);
+
+    updateSettings({ ui: { theme: "dark" } });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(video.playbackRate).toBe(1.75);
+  });
+
+  it("切换默认静音设置时按新设置应用", async () => {
+    vi.useFakeTimers();
+    updateSettings({ video: { defaultMuted: false } });
+    stopPreferences = startMediaPreferences();
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(video.muted).toBe(false);
+
+    updateSettings({ video: { defaultMuted: true } });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(video.muted).toBe(true);
   });
 });

@@ -1,5 +1,7 @@
 # 学习助手 UI 布局重构 — 设计文档
 
+> 后续调整：设置页已按 `2026-10-22-settings-consolidation-media-fix-design.md` 合并为 7 个板块（答题 + 题库缓存、自动翻页 + 媒体播放），本文档保留首轮设计记录。
+
 - 日期：2026-10-22
 - 状态：已批准并实现
 - 范围：`src/ui`、`src/core/settings.ts`、README；不改变自动翻页与媒体运行的既有行为

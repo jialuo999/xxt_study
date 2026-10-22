@@ -123,6 +123,7 @@ export class AutoTurnRunner {
         const externalResult = await this.waitForExternalMedia(
           45 * 60 * 1000,
           () => this.running && token === this.loopToken,
+          settings.video.resumeOnPause,
         );
         if (!this.running || token !== this.loopToken) return;
         if (externalResult === "blocked") {
@@ -160,6 +161,7 @@ export class AutoTurnRunner {
           const lateResult = await this.waitForExternalMedia(
             45 * 60 * 1000,
             () => this.running && token === this.loopToken,
+            settings.video.resumeOnPause,
           );
           if (!this.running || token !== this.loopToken) return;
           if (lateResult === "blocked") {
@@ -238,6 +240,7 @@ export class AutoTurnRunner {
   private async waitForExternalMedia(
     timeoutMs: number,
     isAlive: () => boolean,
+    allowResume: boolean,
   ): Promise<MediaWaitResult> {
     const started = Date.now();
     let pausedSince = 0;
@@ -246,7 +249,7 @@ export class AutoTurnRunner {
       const state = this.host.getChildMediaState();
       if (!state?.hasMedia) return "none";
       if (state.allEnded) return "done";
-      if (state.anyPaused) {
+      if (allowResume && state.anyPaused) {
         if (!pausedSince) pausedSince = Date.now();
         this.host.resumeChildMedia();
         if (Date.now() - pausedSince > 6000) return "blocked";
@@ -367,23 +370,25 @@ export async function waitForMedia(
     if (allDone()) return "done";
 
     const now = Date.now();
-    for (const element of media) await tryResume(element, now);
+    if (preferences.resumeOnPause) {
+      for (const element of media) await tryResume(element, now);
 
-    for (const element of media) {
-      let paused = false;
-      try {
-        paused = element.paused;
-      } catch {
-        continue;
-      }
-      if (!paused) {
-        pausedSince.delete(element);
-        continue;
-      }
-      if (!pausedSince.has(element)) pausedSince.set(element, now);
-      const pausedFor = now - (pausedSince.get(element) ?? now);
-      if (pausedFor > 5000) {
-        return "blocked";
+      for (const element of media) {
+        let paused = false;
+        try {
+          paused = element.paused;
+        } catch {
+          continue;
+        }
+        if (!paused) {
+          pausedSince.delete(element);
+          continue;
+        }
+        if (!pausedSince.has(element)) pausedSince.set(element, now);
+        const pausedFor = now - (pausedSince.get(element) ?? now);
+        if (pausedFor > 5000) {
+          return "blocked";
+        }
       }
     }
 

@@ -26,8 +26,6 @@ type SectionKey =
   | "solving"
   | "ai"
   | "autoTurn"
-  | "media"
-  | "bank"
   | "advanced"
   | "appearance"
   | "data"
@@ -37,8 +35,6 @@ const SECTION_KEYS: SectionKey[] = [
   "solving",
   "ai",
   "autoTurn",
-  "media",
-  "bank",
   "advanced",
   "appearance",
   "data",
@@ -49,8 +45,6 @@ const DEFAULT_OPEN: Record<SectionKey, boolean> = {
   solving: true,
   ai: true,
   autoTurn: false,
-  media: false,
-  bank: false,
   advanced: false,
   appearance: false,
   data: false,
@@ -161,7 +155,7 @@ export function SettingsPage({ controller, state }: PageProps) {
   return (
     <div class="sh-stack">
       <div class="sh-settings-toolbar">
-        <span class="sh-small sh-faint">点击板块标题展开 / 收起</span>
+        <span class="sh-small sh-faint">点击标题展开 / 收起</span>
         <Button
           size="sm"
           variant="ghost"
@@ -174,11 +168,9 @@ export function SettingsPage({ controller, state }: PageProps) {
 
       <CollapsibleCard
         id="solving"
-        title="答题模式"
-        hint={MODE_DESC[settings.solving.mode]}
-        summary={`${MODE_LABEL[settings.solving.mode]} · ${
-          settings.solving.autoSubmit ? "自动提交" : "手动提交"
-        }`}
+        title="答题"
+        hint="答题方式、题库与缓存"
+        summary={`${MODE_LABEL[settings.solving.mode]} · 题库 ${state.bank.total} 条`}
         open={isOpen("solving")}
         onToggle={() => toggleSection("solving")}
       >
@@ -196,7 +188,7 @@ export function SettingsPage({ controller, state }: PageProps) {
             checked={settings.solving.autoSubmit}
             onChange={(autoSubmit) => save({ solving: { autoSubmit } })}
             label="自动提交"
-            description="仅在全自动模式生效；低置信题会暂停等待人工处理。"
+            description="全自动模式下自动提交"
           />
           <Toggle
             checked={settings.solving.includeTypes.short}
@@ -204,7 +196,7 @@ export function SettingsPage({ controller, state }: PageProps) {
               save({ solving: { includeTypes: { ...settings.solving.includeTypes, short: enabled } } })
             }
             label="作答简答题"
-            description="简答题由 AI 生成文本，建议复核后再提交。"
+            description="AI 生成简答文本"
           />
           <Toggle
             checked={settings.solving.allowExam}
@@ -213,13 +205,13 @@ export function SettingsPage({ controller, state }: PageProps) {
               else save({ solving: { allowExam: false } });
             }}
             label="允许在考试页面自动作答"
-            description="高风险选项：可能违反平台规则，默认关闭。"
+            description="高风险，默认关闭"
           />
         </div>
         <div class="sh-divider" style="margin:9px 0" />
         <Field
           label={`最低置信度：${Math.round(settings.solving.minConfidence * 100)}%`}
-          hint="低于该值的答案标记为待确认，不会自动提交。"
+          hint="低于该值标记待确认"
         >
           <input
             class="sh-range"
@@ -233,12 +225,88 @@ export function SettingsPage({ controller, state }: PageProps) {
             }
           />
         </Field>
+
+        <div class="sh-subhead">题库与缓存</div>
+        <Field
+          label={`模糊匹配阈值：${settings.bank.fuzzyThreshold.toFixed(2)}`}
+          hint="建议 0.84–0.90"
+        >
+          <input
+            class="sh-range"
+            type="range"
+            min="0.7"
+            max="0.98"
+            step="0.01"
+            value={settings.bank.fuzzyThreshold}
+            onInput={(event) =>
+              save({ bank: { fuzzyThreshold: Number(event.currentTarget.value) } })
+            }
+          />
+        </Field>
+        <Field label="缓存保留天数" hint="缓存命中不重复请求">
+          <TextInput
+            type="number"
+            min="0"
+            max="365"
+            value={settings.bank.cacheTtlDays}
+            onBlur={(event) => {
+              const value = Number(event.currentTarget.value);
+              if (Number.isFinite(value)) save({ bank: { cacheTtlDays: Math.max(0, value) } });
+            }}
+          />
+        </Field>
+        <div class="sh-divider" style="margin:9px 0" />
+        <Toggle
+          checked={settings.bank.remote.enabled}
+          onChange={(enabled) => save({ bank: { remote: { enabled } } })}
+          label="启用远程题库"
+          description="HTTP 接口，失败回退 AI"
+        />
+        {settings.bank.remote.enabled ? (
+          <div class="sh-stack" style="margin-top:6px">
+            <Field label="接口 URL">
+              <TextInput
+                value={settings.bank.remote.url}
+                placeholder="https://example.com/api/search"
+                onBlur={(event) => save({ bank: { remote: { url: event.currentTarget.value.trim() } } })}
+              />
+            </Field>
+            <Field label="答案字段路径" hint="如 data.answer">
+              <TextInput
+                value={settings.bank.remote.answerPath}
+                placeholder="answer"
+                onBlur={(event) =>
+                  save({ bank: { remote: { answerPath: event.currentTarget.value.trim() } } })
+                }
+              />
+            </Field>
+            <Field label="置信度字段路径">
+              <TextInput
+                value={settings.bank.remote.confidencePath}
+                placeholder="confidence"
+                onBlur={(event) =>
+                  save({ bank: { remote: { confidencePath: event.currentTarget.value.trim() } } })
+                }
+              />
+            </Field>
+            <Field label="请求体模板" hint="占位符：{{question}} / {{type}} / {{options}}">
+              <textarea
+                class="sh-textarea"
+                rows={4}
+                value={settings.bank.remote.bodyTemplate}
+                onBlur={(event) =>
+                  save({ bank: { remote: { bodyTemplate: event.currentTarget.value } } })
+                }
+              />
+            </Field>
+          </div>
+        ) : null}
       </CollapsibleCard>
 
       <CollapsibleCard
         id="ai"
         title="AI 接口"
-        hint="OpenAI 兼容 /chat/completions，Key 只保存在本机"
+        hint="OpenAI 兼容接口，Key 仅存本机"
         summary={`${settings.ai.enabled ? "已启用" : "已关闭"} · ${
           settings.ai.apiKey ? "Key 已配置" : "未配置 Key"
         }`}
@@ -254,7 +322,7 @@ export function SettingsPage({ controller, state }: PageProps) {
           checked={settings.ai.enabled}
           onChange={(enabled) => save({ ai: { enabled } })}
           label="启用 AI 解题"
-          description="题库未命中时调用大模型，按接口用量计费。"
+          description="题库未命中时调用大模型"
         />
         <div class="sh-stack" style="margin-top:8px">
           <Field label="服务预设">
@@ -269,7 +337,7 @@ export function SettingsPage({ controller, state }: PageProps) {
               options={AI_PRESETS.map((preset) => ({ value: preset.label, label: preset.label }))}
             />
           </Field>
-          <Field label="Base URL" hint="例如 https://api.deepseek.com/v1（不带 /chat/completions）">
+          <Field label="Base URL" hint="不带 /chat/completions">
             <TextInput
               value={aiDraft.baseUrl}
               placeholder="https://api.deepseek.com/v1"
@@ -341,9 +409,9 @@ export function SettingsPage({ controller, state }: PageProps) {
       <CollapsibleCard
         id="autoTurn"
         title="自动翻页"
-        hint="只操作页面按钮，不伪造学习进度；延迟与步数使用内置默认值"
+        hint="翻页与媒体行为；延迟和步数使用内置默认值"
         summary={`${settings.autoTurn.enabled ? "已启用" : "未启用"} · ${
-          settings.autoTurn.waitVideoEnd ? "等待视频结束" : "不等待视频"
+          settings.video.defaultMuted ? "默认静音" : "不静音"
         }`}
         open={isOpen("autoTurn")}
         onToggle={() => toggleSection("autoTurn")}
@@ -352,144 +420,51 @@ export function SettingsPage({ controller, state }: PageProps) {
           checked={settings.autoTurn.enabled}
           onChange={(enabled) => save({ autoTurn: { enabled } })}
           label="启用自动翻页"
-          description="章节完成后点击下一节；检测到题目时默认暂停。"
+          description="章节完成后自动下一节"
         />
         <Toggle
           checked={settings.autoTurn.waitVideoEnd}
           onChange={(waitVideoEnd) => save({ autoTurn: { waitVideoEnd } })}
           label="等待视频/音频结束"
-          description="播放结束后再翻页；无音视频时按内置等待时间处理。"
+          description="媒体播完再翻页"
         />
         <Toggle
           checked={settings.autoTurn.stopOnUnanswered}
           onChange={(stopOnUnanswered) => save({ autoTurn: { stopOnUnanswered } })}
           label="遇到未答题目时暂停"
-          description="避免把测验/作业直接翻过去。"
+          description="有未答题目时暂停"
         />
         <Toggle
           checked={settings.autoTurn.resumeOnReload}
           onChange={(resumeOnReload) => save({ autoTurn: { resumeOnReload } })}
           label="刷新/跳转后自动恢复"
-          description="恢复上次的步数；关闭后每次刷新都需要手动开始。"
+          description="刷新后继续上次进度"
         />
-      </CollapsibleCard>
 
-      <CollapsibleCard
-        id="media"
-        title="媒体播放"
-        hint="静音与倍速立即应用；暂停恢复只在自动翻页时生效"
-        summary={`${settings.video.defaultMuted ? "默认静音" : "不静音"} · 倍速在主页调整`}
-        open={isOpen("media")}
-        onToggle={() => toggleSection("media")}
-      >
+        <div class="sh-subhead">媒体播放</div>
         <Toggle
           checked={settings.video.defaultMuted}
           onChange={(defaultMuted) => save({ video: { defaultMuted } })}
           label="默认静音"
-          description="打开媒体时自动静音，可随时在播放器里取消。"
+          description="打开媒体时自动静音"
         />
         <Toggle
           checked={settings.video.resumeOnPause}
           onChange={(resumeOnPause) => save({ video: { resumeOnPause } })}
           label="自动翻页时暂停后恢复"
-          description="只在等待媒体结束的自动翻页流程里生效；关闭翻页后不会干预视频/音频。"
+          description="翻页等待时恢复暂停"
         />
         <div class="sh-hint" style="margin-top:6px">
-          播放倍速已移到主页「自动翻页」卡片，默认 1x。这里只调整页面中 video / audio
-          元素的 muted 与 playbackRate，不伪造进度、不调用平台日志接口。
+          倍速在主页「自动翻页」卡片调整，默认 1x；不伪造进度。
         </div>
-      </CollapsibleCard>
-
-      <CollapsibleCard
-        id="bank"
-        title="题库与缓存"
-        hint="本地 IndexedDB，可导入导出；远程题库为可选能力"
-        summary={`${state.bank.total} 条 · 模糊阈值 ${settings.bank.fuzzyThreshold.toFixed(2)}`}
-        open={isOpen("bank")}
-        onToggle={() => toggleSection("bank")}
-      >
-        <Field
-          label={`模糊匹配阈值：${settings.bank.fuzzyThreshold.toFixed(2)}`}
-          hint="越高越严格；建议 0.84–0.90。"
-        >
-          <input
-            class="sh-range"
-            type="range"
-            min="0.7"
-            max="0.98"
-            step="0.01"
-            value={settings.bank.fuzzyThreshold}
-            onInput={(event) =>
-              save({ bank: { fuzzyThreshold: Number(event.currentTarget.value) } })
-            }
-          />
-        </Field>
-        <Field label="缓存保留天数" hint="命中缓存的题目不再重复请求 AI。">
-          <TextInput
-            type="number"
-            min="0"
-            max="365"
-            value={settings.bank.cacheTtlDays}
-            onBlur={(event) => {
-              const value = Number(event.currentTarget.value);
-              if (Number.isFinite(value)) save({ bank: { cacheTtlDays: Math.max(0, value) } });
-            }}
-          />
-        </Field>
-        <div class="sh-divider" style="margin:9px 0" />
-        <Toggle
-          checked={settings.bank.remote.enabled}
-          onChange={(enabled) => save({ bank: { remote: { enabled } } })}
-          label="启用远程题库"
-          description="按自定义 HTTP 接口检索，失败时自动回退 AI。"
-        />
-        {settings.bank.remote.enabled ? (
-          <div class="sh-stack" style="margin-top:6px">
-            <Field label="接口 URL">
-              <TextInput
-                value={settings.bank.remote.url}
-                placeholder="https://example.com/api/search"
-                onBlur={(event) => save({ bank: { remote: { url: event.currentTarget.value.trim() } } })}
-              />
-            </Field>
-            <Field label="答案字段路径" hint="例如 data.answer；留空使用 answer。">
-              <TextInput
-                value={settings.bank.remote.answerPath}
-                placeholder="answer"
-                onBlur={(event) =>
-                  save({ bank: { remote: { answerPath: event.currentTarget.value.trim() } } })
-                }
-              />
-            </Field>
-            <Field label="置信度字段路径">
-              <TextInput
-                value={settings.bank.remote.confidencePath}
-                placeholder="confidence"
-                onBlur={(event) =>
-                  save({ bank: { remote: { confidencePath: event.currentTarget.value.trim() } } })
-                }
-              />
-            </Field>
-            <Field label="请求体模板" hint="支持 {{question}} / {{type}} / {{options}} 三个占位符。">
-              <textarea
-                class="sh-textarea"
-                rows={4}
-                value={settings.bank.remote.bodyTemplate}
-                onBlur={(event) =>
-                  save({ bank: { remote: { bodyTemplate: event.currentTarget.value } } })
-                }
-              />
-            </Field>
-          </div>
-        ) : null}
       </CollapsibleCard>
 
       <CollapsibleCard
         id="advanced"
         title="高级与通用适配器"
-        hint="为学习通之外的平台配置选择器（实验性）"
+        hint="自定义平台选择器（实验性）"
         summary={`${settings.advanced.debug ? "调试开" : "调试关"}${
-          settings.advanced.genericConfig ? " · 已配置通用适配器" : ""
+          settings.advanced.genericConfig ? " · 已配置" : ""
         }`}
         open={isOpen("advanced")}
         onToggle={() => toggleSection("advanced")}
@@ -498,11 +473,11 @@ export function SettingsPage({ controller, state }: PageProps) {
           checked={settings.advanced.debug}
           onChange={(debug) => save({ advanced: { debug } })}
           label="调试模式"
-          description="输出更详细的日志，便于排查页面适配问题；不会暴露 API Key。"
+          description="输出详细日志"
         />
         <Field
           label="通用适配器 JSON"
-          hint="需要 name / matches / questionContainer / stem；可选 options、typeLabel、nextButton、submitButton。保存后刷新页面生效。"
+          hint="字段：name / matches / questionContainer / stem"
         >
           <textarea
             class="sh-textarea"
@@ -538,6 +513,7 @@ export function SettingsPage({ controller, state }: PageProps) {
       <CollapsibleCard
         id="appearance"
         title="外观与快捷键"
+        hint="主题与呼出快捷键"
         summary={`${THEME_LABEL[settings.ui.theme]} · ${settings.ui.hotkey}`}
         open={isOpen("appearance")}
         onToggle={() => toggleSection("appearance")}
@@ -553,7 +529,7 @@ export function SettingsPage({ controller, state }: PageProps) {
             ]}
           />
         </Field>
-        <Field label="快捷键" hint="格式示例：Alt+Shift+S；保存后立即生效。">
+        <Field label="快捷键" hint="如 Alt+Shift+S">
           <TextInput
             value={settings.ui.hotkey}
             onBlur={(event) =>
@@ -566,7 +542,7 @@ export function SettingsPage({ controller, state }: PageProps) {
       <CollapsibleCard
         id="data"
         title="数据与隐私"
-        hint="所有数据只保存在本机，不上传"
+        hint="数据仅保存在本机"
         summary={`Key ${settings.ai.apiKey ? "已设置" : "未设置"} · 题库 ${state.bank.total} 条`}
         open={isOpen("data")}
         onToggle={() => toggleSection("data")}
@@ -578,20 +554,18 @@ export function SettingsPage({ controller, state }: PageProps) {
         </div>
         <div class="sh-hint" style="margin-top:8px">
           当前 Key：{settings.ai.apiKey ? mask(settings.ai.apiKey) : "未设置"} · 题库{" "}
-          {state.bank.total} 条 · 运行日志在下方「运行日志」板块中管理。
+          {state.bank.total} 条
         </div>
       </CollapsibleCard>
 
       <CollapsibleCard
         id="logs"
         title="运行日志"
-        hint="操作、AI 请求与错误记录，已自动脱敏 Key / Authorization"
+        hint="自动脱敏，最多保留 500 条"
         summary={`${state.logs.length} 条记录${errorCount ? ` · ${errorCount} 条错误` : ""}`}
         open={isOpen("logs")}
         onToggle={() => toggleSection("logs")}
-        action={
-          errorCount ? <Badge tone="danger">{errorCount} 错误</Badge> : undefined
-        }
+        action={errorCount ? <Badge tone="danger">{errorCount} 错误</Badge> : undefined}
       >
         <LogsPanel controller={controller} state={state} />
       </CollapsibleCard>

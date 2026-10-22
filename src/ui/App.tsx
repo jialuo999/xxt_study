@@ -131,20 +131,18 @@ export function App({ controller }: { controller: UiController }) {
         y: clamp(origin.y + lastDy, 8, maxY),
       };
       if (drag.moved) {
+        if (dragElement) {
+          // 同一帧内同步提交 left/top 并清除 transform，避免两者叠加导致松手时抖一下
+          dragElement.style.left = `${finalPosition.x}px`;
+          dragElement.style.top = `${finalPosition.y}px`;
+          dragElement.style.transform = "";
+          dragElement.style.willChange = "";
+          requestAnimationFrame(() => {
+            if (dragElement) dragElement.style.transition = "";
+          });
+        }
         setPosition(finalPosition);
         controller.saveSettings({ ui: { x: finalPosition.x, y: finalPosition.y } });
-        // 等 Preact 用新的 left/top 渲染后再清除 transform，避免闪回
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            if (dragElement) {
-              dragElement.style.transform = "";
-              dragElement.style.willChange = "";
-              requestAnimationFrame(() => {
-                dragElement.style.transition = "";
-              });
-            }
-          }),
-        );
       } else {
         if (dragElement) {
           dragElement.style.transform = "";

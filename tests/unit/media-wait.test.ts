@@ -58,4 +58,28 @@ describe("waitForMedia", () => {
   it("没有媒体时返回 none", async () => {
     await expect(waitForMedia(document, 1000, () => true, preferences)).resolves.toBe("none");
   });
+
+  it("关闭暂停恢复后不自动播放，也不把暂停判定为 blocked", async () => {
+    const video = mockVideo({ playSucceeds: true });
+    const noResume = { ...preferences, resumeOnPause: false };
+    let settled = false;
+    const promise = waitForMedia(document, 10000, () => true, noResume).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await vi.advanceTimersByTimeAsync(7000);
+    expect(settled).toBe(false);
+    expect(video.play).not.toHaveBeenCalled();
+
+    finishMedia(video);
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(promise).resolves.toBe("done");
+  });
 });
+
+function finishMedia(video: HTMLVideoElement): void {
+  Object.defineProperty(video, "ended", { get: () => true, configurable: true });
+  Object.defineProperty(video, "paused", { get: () => false, configurable: true });
+  Object.defineProperty(video, "currentTime", { get: () => 10, configurable: true });
+}

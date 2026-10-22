@@ -58,53 +58,72 @@ function applyRate(media: HTMLMediaElement, rateValue: number): void {
   }
 }
 
-function applyToMedia(media: HTMLMediaElement, settings: VideoSettings): void {
-  try {
-    if (media.muted !== settings.defaultMuted) media.muted = settings.defaultMuted;
-    try {
-      media.defaultMuted = settings.defaultMuted;
-    } catch {
-      /* older browsers */
-    }
-    applyRate(media, settings.playbackRate);
-  } catch {
-    /* 某些播放器会锁定这些属性 */
-  }
-}
-
-/** 应用视频/音频静音与倍速（导出供测试与子 frame 复用） */
+/** 显式把静音与倍速应用到指定文档（用于测试或一次性应用） */
 export function applyMediaPreferences(
   doc: Document = document,
   settings: VideoSettings = getSettings().video,
 ): number {
   const media = collectMedia(doc);
-  for (const element of media) applyToMedia(element, settings);
+  for (const element of media) {
+    try {
+      if (element.muted !== settings.defaultMuted) element.muted = settings.defaultMuted;
+      element.defaultMuted = settings.defaultMuted;
+    } catch {
+      /* 某些播放器会锁定静音属性 */
+    }
+    applyRate(element, settings.playbackRate);
+  }
   return media.length;
 }
 
 /**
- * 监听媒体创建与播放事件，应用静音/倍速。
+ * 监听媒体创建并应用静音/倍速。
  *
- * 平台播放器经常在 loadedmetadata、切段或播放开始时把 playbackRate 重置为 1，
- * 因此当用户选择非 1x 时，每 2 秒重新断言一次倍速（参考公开脚本的常见做法）。
- * 暂停恢复不在这里做：只有自动翻页等待媒体结束、或宿主显式请求时才恢复。
+ * 设计原则：尽量不打扰用户。
+ * - 默认静音只在新媒体第一次出现时应用一次；用户手动静音/取消静音后不再覆盖。
+ * - 设置 1x 时完全不写 playbackRate，避免覆盖播放器内手动调整的速度。
+ * - 普通设置变更（主题、折叠板块等）不触发媒体重置；只有视频设置真正变化才应用。
+ * - 非 1x 时，平台重置倍速后由 timeupdate / 定时器补回。
  */
 export function startMediaPreferences(): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
   const initialized = new WeakSet<HTMLMediaElement>();
+  let mutedByUser = new WeakSet<HTMLMediaElement>();
+  const lastAppliedMuted = new WeakMap<HTMLMediaElement, boolean>();
+  let lastVideo = { ...getSettings().video };
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const applyAll = () => {
-    for (const media of collectMedia()) {
-      applyToMedia(media, getSettings().video);
-      initialized.add(media);
+  const muteOnce = (media: HTMLMediaElement, defaultMuted: boolean): void => {
+    if (!defaultMuted || mutedByUser.has(media) || media.muted) return;
+    try {
+      media.muted = true;
+      media.defaultMuted = true;
+    } catch {
+      return;
     }
+    lastAppliedMuted.set(media, true);
   };
 
-  const applyNew = () => {
+  const applyConfiguredRate = (media: HTMLMediaElement, rateValue: number): void => {
+    // 1x 表示保持播放器原速，不主动写入
+    if (Math.abs(rateValue - 1) < 0.001) return;
+    applyRate(media, rateValue);
+  };
+
+  const applyToMedia = (media: HTMLMediaElement, settings: VideoSettings): void => {
+    muteOnce(media, settings.defaultMuted);
+    applyConfiguredRate(media, settings.playbackRate);
+    initialized.add(media);
+  };
+
+  const applyAll = (): void => {
+    const settings = getSettings().video;
+    for (const media of collectMedia()) applyToMedia(media, settings);
+  };
+
+  const applyNew = (): void => {
+    const settings = getSettings().video;
     for (const media of collectMedia()) {
-      if (initialized.has(media)) continue;
-      applyToMedia(media, getSettings().video);
-      initialized.add(media);
+      if (!initialized.has(media)) applyToMedia(media, settings);
     }
   };
 
@@ -125,12 +144,24 @@ export function startMediaPreferences(): () => void {
     /* ignore */
   }
 
+  /** 用户手动静音/取消静音后，后续不再覆盖 */
+  const onVolumeChange = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLMediaElement)) return;
+    const applied = lastAppliedMuted.get(target);
+    if (applied !== undefined && target.muted !== applied) mutedByUser.add(target);
+  };
+  document.addEventListener("volumechange", onVolumeChange, true);
+
   const onMediaReady = (event: Event) => {
     const target = event.target;
-    if (target instanceof HTMLMediaElement) {
+    if (!(target instanceof HTMLMediaElement)) return;
+    if (!initialized.has(target)) {
       applyToMedia(target, getSettings().video);
-      initialized.add(target);
+      return;
     }
+    // 非 1x 时平台可能在播放开始后重置倍速，补一次；1x 不干预
+    applyConfiguredRate(target, getSettings().video.playbackRate);
   };
   let lastRateCheck = 0;
   const onTimeUpdate = (event: Event) => {
@@ -148,14 +179,30 @@ export function startMediaPreferences(): () => void {
   document.addEventListener("play", onMediaReady, true);
   document.addEventListener("timeupdate", onTimeUpdate, true);
 
-  // 学习通等播放器可能在播放中重置倍速，定时重新应用（不改静音，避免覆盖用户操作）
+  // 学习通等播放器可能在播放中重置倍速，定时补回（仅非 1x）
   const rateTimer = setInterval(() => {
     const rate = getSettings().video.playbackRate;
     if (Math.abs(rate - 1) < 0.001) return;
     for (const media of collectMedia()) applyRate(media, rate);
   }, 2000);
 
-  const unsubscribe = subscribeSettings(() => applyAll());
+  const unsubscribe = subscribeSettings(() => {
+    const next = { ...getSettings().video };
+    const rateChanged = Math.abs(next.playbackRate - lastVideo.playbackRate) > 0.001;
+    const muteChanged = next.defaultMuted !== lastVideo.defaultMuted;
+    lastVideo = next;
+
+    // 用户显式改设置时才重置静音；关闭默认静音不强行为用户取消静音
+    if (muteChanged) {
+      mutedByUser = new WeakSet<HTMLMediaElement>();
+      if (next.defaultMuted) {
+        for (const media of collectMedia()) muteOnce(media, true);
+      }
+    }
+    if (rateChanged) {
+      for (const media of collectMedia()) applyRate(media, next.playbackRate);
+    }
+  });
 
   return () => {
     if (timer) clearTimeout(timer);
@@ -165,6 +212,7 @@ export function startMediaPreferences(): () => void {
     document.removeEventListener("canplay", onMediaReady, true);
     document.removeEventListener("play", onMediaReady, true);
     document.removeEventListener("timeupdate", onTimeUpdate, true);
+    document.removeEventListener("volumechange", onVolumeChange, true);
     unsubscribe();
   };
 }

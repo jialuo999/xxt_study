@@ -94,16 +94,40 @@ describe("导航与主页布局", () => {
     expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { autoTurn: true } } });
     expect(onNavigate).toHaveBeenCalledWith("settings");
   });
+
+  it("拖动悬浮球松手时同步提交位置并清除 transform", () => {
+    const state = makeState();
+    state.settings.ui.collapsed = true;
+    state.settings.ui.x = 100;
+    state.settings.ui.y = 100;
+    const { controller, saveSettings } = makeController(state);
+    const container = mount(h(App, { controller }));
+    const bubble = container.querySelector<HTMLElement>(".sh-bubble");
+    expect(bubble).not.toBeNull();
+
+    bubble?.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 100, clientY: 100 }),
+    );
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 150, clientY: 140 }));
+    expect(bubble?.style.transform).toContain("translate3d");
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, clientY: 140 }));
+
+    const moved = container.querySelector<HTMLElement>(".sh-bubble");
+    expect(moved?.style.left).toBe("150px");
+    expect(moved?.style.top).toBe("140px");
+    expect(moved?.style.transform).toBe("");
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { x: 150, y: 140 } });
+  });
 });
 
 describe("设置页折叠板块", () => {
-  it("渲染 9 个可折叠板块，默认只展开答题模式与 AI 接口", () => {
+  it("渲染 7 个可折叠板块，默认只展开答题与 AI 接口", () => {
     const state = makeState();
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
     const sections = container.querySelectorAll("[data-section]");
-    expect(sections).toHaveLength(9);
+    expect(sections).toHaveLength(7);
 
     const expanded = (id: string) =>
       container
@@ -113,6 +137,24 @@ describe("设置页折叠板块", () => {
     expect(expanded("ai")).toBe("true");
     expect(expanded("autoTurn")).toBe("false");
     expect(expanded("logs")).toBe("false");
+  });
+
+  it("题库与缓存合并进答题板块", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ui.sectionStates = { autoTurn: true };
+    const state = makeState({ settings });
+    const { controller } = makeController(state);
+    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
+
+    const answerSection = container.querySelector('[data-section="solving"]');
+    expect(answerSection).not.toBeNull();
+    expect(answerSection?.textContent).toContain("题库与缓存");
+    expect(answerSection?.textContent).toContain("模糊匹配阈值");
+    expect(answerSection?.textContent).toContain("缓存保留天数");
+
+    const autoTurnSection = container.querySelector('[data-section="autoTurn"]');
+    expect(autoTurnSection).not.toBeNull();
+    expect(autoTurnSection?.textContent).toContain("媒体播放");
   });
 
   it("点击板块标题写入对应的展开状态", () => {
@@ -129,7 +171,7 @@ describe("设置页折叠板块", () => {
     expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { logs: true } } });
   });
 
-  it("全部展开会写入全部 9 个板块状态", () => {
+  it("全部展开会写入全部 7 个板块状态", () => {
     const state = makeState();
     const { controller, saveSettings } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
@@ -147,8 +189,6 @@ describe("设置页折叠板块", () => {
       "solving",
       "ai",
       "autoTurn",
-      "media",
-      "bank",
       "advanced",
       "appearance",
       "data",
@@ -157,26 +197,26 @@ describe("设置页折叠板块", () => {
     expect(Object.values(patch.ui.sectionStates).every(Boolean)).toBe(true);
   });
 
-  it("自动翻页板块不再包含延迟与步数输入", () => {
-    const state = makeState({
-      settings: {
-        ...structuredClone(DEFAULT_SETTINGS),
-        ui: { ...structuredClone(DEFAULT_SETTINGS).ui, sectionStates: { autoTurn: true } },
-      },
-    });
+  it("自动翻页板块合并媒体播放且不再包含延迟与步数输入", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ui.sectionStates = { autoTurn: true };
+    const state = makeState({ settings });
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
     const text = container.textContent ?? "";
     expect(text).toContain("启用自动翻页");
+    expect(text).toContain("媒体播放");
+    expect(text).toContain("默认静音");
+    expect(text).toContain("自动翻页时暂停后恢复");
     for (const removed of ["开始前延迟", "无音视频时等待", "最小延迟", "最大延迟", "最大步数"]) {
       expect(text).not.toContain(removed);
     }
   });
 
-  it("媒体播放板块不再提供默认倍速，提示去主页调整", () => {
+  it("媒体播放不再提供默认倍速，提示去主页调整", () => {
     const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.ui.sectionStates = { media: true };
+    settings.ui.sectionStates = { autoTurn: true };
     const state = makeState({ settings });
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
