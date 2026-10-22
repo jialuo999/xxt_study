@@ -853,20 +853,55 @@ export class HostController implements UiController {
     });
   }
 
+  private currentChapterId(): string {
+    try {
+      return new URL(location.href).searchParams.get("chapterId") ?? "";
+    } catch {
+      return "";
+    }
+  }
+
   /** 汇总子 frame 的媒体状态，供自动翻页判断视频/音频是否结束 */
   getChildMediaState(): MediaState | null {
     // 只信任最近上报；frame 卸载/切换后旧状态最多保留 3.5 秒，避免把上一页的“已完成”带过来
-    const fresh = [...this.childMedia.values()].filter((item) => Date.now() - item.at < 3500);
-    if (fresh.length === 0) return null;
-    const media = fresh.filter((item) => item.state.hasMedia);
-    const currentTaskFinished = fresh.some((item) => item.state.currentTaskFinished === true);
-    const allTasksFinished = fresh.some((item) => item.state.allTasksFinished === true);
-    if (media.length === 0 && !currentTaskFinished && !allTasksFinished) return null;
+    const entries = [...this.childMedia.entries()].filter(
+      ([, item]) => Date.now() - item.at < 3500,
+    );
+    if (entries.length === 0) return null;
+    const media = entries.map(([, item]) => item).filter((item) => item.state.hasMedia);
+
+    // 任务点完成状态只取“当前章节”的内容 frame；只有整章任务点都完成才跳过，
+    // 避免章节里还有未完成视频时被单个知识卡片的完成状态带过去
+    const chapterId = this.currentChapterId();
+    let allTasksFinished = false;
+    for (const [frameId, item] of entries) {
+      if (!chapterId) {
+        if (item.state.allTasksFinished) allTasksFinished = true;
+        continue;
+      }
+      const child = this.children.get(frameId);
+      if (!child) continue;
+      let matchesChapter = false;
+      try {
+        const url = new URL(child.url);
+        const knowledgeId =
+          url.searchParams.get("knowledgeid") ?? url.searchParams.get("knowledgeId") ?? "";
+        matchesChapter =
+          knowledgeId === chapterId || url.searchParams.get("chapterId") === chapterId;
+      } catch {
+        /* ignore */
+      }
+      if (!matchesChapter) continue;
+      if (item.state.allTasksFinished) allTasksFinished = true;
+    }
+    const finished = allTasksFinished;
+
+    if (media.length === 0 && !finished) return null;
     return {
       hasMedia: media.length > 0,
       allEnded: media.length > 0 && media.every((item) => item.state.allEnded),
       anyPaused: media.some((item) => item.state.anyPaused),
-      currentTaskFinished,
+      currentTaskFinished: finished,
       allTasksFinished,
     };
   }

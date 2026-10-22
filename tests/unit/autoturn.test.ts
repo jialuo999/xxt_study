@@ -104,4 +104,46 @@ describe("AutoTurnRunner 翻页校验", () => {
     expect(host.stopped.some((reason) => reason.includes("页面没有变化"))).toBe(true);
     expect(runner.isRunning).toBe(false);
   });
+
+  it("当前任务点已完成时跳过视频等待直接翻页", async () => {
+    updateSettings({ autoTurn: { maxSteps: 1 } });
+    let signature = "finished-1";
+    const host = makeHost({
+      signature: () => signature,
+      onChangeSignature: () => {
+        signature = "finished-2";
+      },
+    });
+    host.getChildMediaState = () => ({
+      hasMedia: true,
+      allEnded: false,
+      anyPaused: true,
+      currentTaskFinished: true,
+    });
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    runner.stop("测试结束");
+
+    expect(host.nextPage).toHaveBeenCalledTimes(1);
+    const lastState = host.states.at(-1) as AutoTurnView;
+    expect(lastState.steps).toBe(1);
+  });
+
+  it("当前任务点未完成时不会跳过视频等待", async () => {
+    const host = makeHost({ signature: () => "unfinished" });
+    host.getChildMediaState = () => ({
+      hasMedia: true,
+      allEnded: false,
+      anyPaused: true,
+      currentTaskFinished: false,
+    });
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(host.nextPage).not.toHaveBeenCalled();
+    expect(runner.isRunning).toBe(true);
+    runner.stop("测试结束");
+  });
 });

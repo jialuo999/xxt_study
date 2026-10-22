@@ -41,8 +41,9 @@
 
 ### 2.2 已完成任务点与旧媒体状态
 
-- 子 frame 检测 `.ans-job-icon` 的父级 `.ans-job-finished`，上报 `currentTaskFinished` / `allTasksFinished`，仅用于日志诊断。
-- **不直接用这些标志跳过媒体等待**：页面上可能同时存在知识卡片、视频等多个子 frame，其它 frame 的“已完成”容易被误当成当前任务点；实测旧实现会在 3 秒内连续跳过多个章节。
+- 子 frame 检测 `.ans-job-icon` 的父级 `.ans-job-finished`，上报 `currentTaskFinished` / `allTasksFinished`。
+- Host 只接受**当前章节**内容 frame（`knowledgeid`/`chapterId` 与顶层 `chapterId` 匹配）的任务状态，避免知识卡片或旧 frame 误报导致未完成任务被跳过。
+- **只有整章任务点都完成**（`.ans-job-icon` 父级全部 `.ans-job-finished`）时才跳过媒体等待；章节里还有未完成视频时必须等待视频结束。之前的“当前可见任务已完成”判断在卡片+视频混排时会误跳过未完成视频。
 - Host 在收到新的 frame `HELLO`（任务点/页面切换）时清空旧 `childMedia` 状态，避免上一页的 `allEnded` 让自动翻页误以为视频已结束；随后以新媒体上报 + 结束锁存为准。
 - `MediaState` 增加两个可选字段，旧消息/旧测试不受影响。
 
@@ -54,11 +55,12 @@
 - 仍无变化则停止并提示，不再循环执行同一个任务点；
 - `visited` 改用任务签名，避免顶层 URL 不变导致误判。
 
-### 2.4 聚焦播放器
+### 2.4 聚焦播放器与暂停等待
 
 - 新增 `focusMedia()`：设置 `tabIndex`、`focus()`，并派发 `mouseover` / `mouseenter` / `mousemove`；
 - 自动翻页恢复播放、子 frame `resumeMedia` 前调用；
-- `play()` 失败后尝试点击视频区域再播放一次，仍未成功才判定 blocked。
+- `play()` 失败后尝试点击视频区域再播放一次；
+- 跨 frame 视频暂停且 8 秒内无法自动恢复时，不再直接停止自动翻页，而是提示“请手动点击播放”，持续等待用户恢复；播放结束后继续翻页。
 
 ### 2.5 frame id 唯一
 

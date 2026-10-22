@@ -123,11 +123,14 @@ export class AutoTurnRunner {
       }
     }
 
-    if (external?.currentTaskFinished || external?.allTasksFinished) {
-      // 仅记录用于诊断；是否跳过仍以媒体状态为准，避免误把其它 frame 的完成状态当成当前任务点
-      logger.debug("autoturn", "子 frame 报告任务点已完成", external);
+    const taskFinished = Boolean(external?.currentTaskFinished);
+    if (taskFinished) {
+      this.emit("当前任务点均已完成，跳过等待", false);
+      logger.info("autoturn", "当前任务点均已完成，跳过媒体等待");
+    } else if (external?.allTasksFinished) {
+      logger.debug("autoturn", "当前章节任务点均已完成", external);
     }
-    if (settings.autoTurn.waitVideoEnd) {
+    if (settings.autoTurn.waitVideoEnd && !taskFinished) {
       this.emit("等待视频/音频播放结束…", false);
       if (external?.hasMedia) {
         const externalResult = await this.waitForExternalMedia(
@@ -293,6 +296,7 @@ export class AutoTurnRunner {
     const started = Date.now();
     let pausedSince = 0;
     let endedSince = 0;
+    let lastPauseNotice = 0;
     while (Date.now() - started < timeoutMs) {
       if (!isAlive()) return "none";
       const state = this.host.getChildMediaState();
@@ -307,7 +311,12 @@ export class AutoTurnRunner {
       if (allowResume && state.anyPaused) {
         if (!pausedSince) pausedSince = Date.now();
         this.host.resumeChildMedia();
-        if (Date.now() - pausedSince > 6000) return "blocked";
+        // 不因暂停直接停止，等待用户手动播放；播放结束后会自动继续翻页
+        if (Date.now() - pausedSince > 8000 && Date.now() - lastPauseNotice > 15000) {
+          lastPauseNotice = Date.now();
+          this.emit("视频已暂停，请手动点击播放；播放结束后会自动翻页", false);
+          logger.info("autoturn", "视频暂停且无法自动恢复，等待手动播放");
+        }
       } else {
         pausedSince = 0;
       }
