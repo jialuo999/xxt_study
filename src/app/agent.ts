@@ -151,6 +151,7 @@ export class FrameAgent {
   };
 
   private collectAndSend(force = false): void {
+    this.detect();
     if (!this.adapter || !this.context) {
       if (this.token) {
         sendToWindow(

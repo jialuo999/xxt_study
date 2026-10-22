@@ -809,7 +809,7 @@ export class HostController implements UiController {
       } catch {
         closed = false;
       }
-      if (closed || Date.now() - child.lastSeen > 90000) {
+      if (closed || Date.now() - child.lastSeen > 5 * 60_000) {
         this.children.delete(frameId);
         changed = true;
       }
