@@ -850,7 +850,8 @@ export class HostController implements UiController {
 
   /** 汇总子 frame 的媒体状态，供自动翻页判断视频/音频是否结束 */
   getChildMediaState(): MediaState | null {
-    const fresh = [...this.childMedia.values()].filter((item) => Date.now() - item.at < 10000);
+    // 只信任最近上报；frame 卸载/切换后旧状态最多保留 3.5 秒，避免把上一页的“已完成”带过来
+    const fresh = [...this.childMedia.values()].filter((item) => Date.now() - item.at < 3500);
     if (fresh.length === 0) return null;
     const media = fresh.filter((item) => item.state.hasMedia);
     const currentTaskFinished = fresh.some((item) => item.state.currentTaskFinished === true);

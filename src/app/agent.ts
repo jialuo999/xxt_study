@@ -294,7 +294,16 @@ export class FrameAgent {
         if (media.paused && !media.ended) {
           focusMedia(media);
           if (settings.video.defaultMuted) media.muted = true;
-          await media.play();
+          try {
+            await media.play();
+          } catch {
+            try {
+              media.click();
+              await media.play();
+            } catch {
+              /* 浏览器可能拒绝自动播放 */
+            }
+          }
         }
       } catch {
         /* 浏览器可能拒绝自动播放 */
