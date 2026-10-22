@@ -13,7 +13,6 @@ const MEDIA_WAIT_TIMEOUT = 45 * 60 * 1000;
 interface AutoTurnSession {
   running: boolean;
   steps: number;
-  startedAt: number;
   visited: string[];
   lastUrl: string;
 }
@@ -33,7 +32,6 @@ export class AutoTurnRunner {
   private running = false;
   private steps = 0;
   private visited: string[] = [];
-  private startedAt = 0;
   private loopToken = 0;
 
   constructor(private readonly host: AutoTurnHost) {}
@@ -51,13 +49,6 @@ export class AutoTurnRunner {
     }
     const session = readSession();
     if (!session?.running) return;
-    this.startedAt = session.startedAt || Date.now();
-    const scheduleError = this.scheduleError(settings);
-    if (scheduleError) {
-      this.persist(false);
-      this.emit(`未恢复：${scheduleError}`, true);
-      return;
-    }
     this.running = true;
     this.steps = session.steps;
     this.visited = session.visited ?? [];
@@ -70,15 +61,6 @@ export class AutoTurnRunner {
     if (this.running) return;
     const settings = getSettings();
     if (!settings.autoTurn.enabled) return;
-    this.startedAt = Date.now();
-    const scheduleError = this.scheduleError(settings);
-    if (scheduleError) {
-      this.running = false;
-      this.persist(false);
-      this.emit(scheduleError, true);
-      this.host.onStopped(scheduleError);
-      return;
-    }
     this.running = true;
     this.steps = 0;
     this.visited = [];
@@ -116,11 +98,6 @@ export class AutoTurnRunner {
     }
     if (page.kind !== "chapter" && page.kind !== "cards" && page.kind !== "video") {
       this.stop("当前页面不是章节/视频页，自动翻页已停止");
-      return;
-    }
-    const scheduleError = this.scheduleError(settings);
-    if (scheduleError) {
-      this.stop(scheduleError);
       return;
     }
     if (this.steps >= settings.autoTurn.maxSteps) {
@@ -176,20 +153,10 @@ export class AutoTurnRunner {
       }
     }
 
-    const afterWait = this.scheduleError(settings);
-    if (afterWait) {
-      this.stop(afterWait);
-      return;
-    }
     const delay = jitter(settings.autoTurn.minDelayMs, settings.autoTurn.maxDelayMs);
     this.emit(`${Math.max(1, Math.ceil(delay / 1000))} 秒后翻页`, false, Date.now() + delay);
     await sleep(delay);
     if (!this.running || token !== this.loopToken) return;
-    const afterDelay = this.scheduleError(settings);
-    if (afterDelay) {
-      this.stop(afterDelay);
-      return;
-    }
 
     const adapter = this.host.getAdapter();
     const context = this.host.getContext();
@@ -250,22 +217,6 @@ export class AutoTurnRunner {
     return "timeout";
   }
 
-  private scheduleError(settings = getSettings()): string | null {    const { dailyStart, dailyEnd, maxRunMinutes } = settings.autoTurn;
-    if (dailyStart || dailyEnd) {
-      const now = new Date();
-      if (!isWithinDailyWindow(now, dailyStart, dailyEnd)) {
-        return `当前不在设定的翻页时间段（${dailyStart || "00:00"}–${dailyEnd || "24:00"}）`;
-      }
-    }
-    if (maxRunMinutes > 0 && this.startedAt > 0) {
-      const elapsedMinutes = (Date.now() - this.startedAt) / 60000;
-      if (elapsedMinutes >= maxRunMinutes) {
-        return `已达到最大运行时长（${maxRunMinutes} 分钟）`;
-      }
-    }
-    return null;
-  }
-
   private emit(message: string, stopped = false, nextAt: number | null = null): void {
     const settings = getSettings();
     this.host.onState({
@@ -281,7 +232,6 @@ export class AutoTurnRunner {
     const session: AutoTurnSession = {
       running,
       steps: this.steps,
-      startedAt: this.startedAt,
       visited: this.visited.slice(-30),
       lastUrl: location.href,
     };
@@ -301,34 +251,6 @@ function readSession(): AutoTurnSession | null {
   } catch {
     return null;
   }
-}
-
-/** 解析 "HH:mm"，非法返回 null */
-export function parseClock(value: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? "").trim());
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-
-/**
- * 判断当前时间是否在每日时间窗内。
- * 两端都为空视为全天；只填一端视为从该时刻起/到该时刻止；
- * start > end 视为跨午夜（例如 23:00–06:00）。
- */
-export function isWithinDailyWindow(now: Date, start: string, end: string): boolean {
-  const startMinutes = parseClock(start);
-  const endMinutes = parseClock(end);
-  if (startMinutes == null && endMinutes == null) return true;
-  const current = now.getHours() * 60 + now.getMinutes();
-  if (startMinutes != null && endMinutes == null) return current >= startMinutes;
-  if (startMinutes == null && endMinutes != null) return current < endMinutes;
-  if (startMinutes == null || endMinutes == null) return true;
-  if (startMinutes === endMinutes) return true;
-  if (startMinutes < endMinutes) return current >= startMinutes && current < endMinutes;
-  return current >= startMinutes || current < endMinutes;
 }
 
 export type MediaWaitResult = "done" | "none" | "blocked" | "timeout";
@@ -380,7 +302,7 @@ export async function waitForMedia(
       pausedSince.delete(element);
       return;
     }
-    const canResume = element.currentTime < 1 ? preferences.autoPlay : preferences.resumeOnPause;
+    const canResume = preferences.resumeOnPause;
     if (!canResume) {
       if (!pausedSince.has(element)) pausedSince.set(element, now);
       return;

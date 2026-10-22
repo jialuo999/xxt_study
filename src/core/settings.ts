@@ -34,7 +34,6 @@ export interface BankSettings {
 
 export interface AutoTurnSettings {
   enabled: boolean;
-  scope: "chapter" | "card" | "quiz";
   waitVideoEnd: boolean;
   minDelayMs: number;
   maxDelayMs: number;
@@ -42,16 +41,8 @@ export interface AutoTurnSettings {
   stopOnUnanswered: boolean;
   /** 开始翻页前等待（毫秒） */
   startDelayMs: number;
-  /** 单次运行最长分钟数；0 表示不限制 */
-  maxRunMinutes: number;
-  /** 每天开始时间 HH:mm；留空表示不限制 */
-  dailyStart: string;
-  /** 每天结束时间 HH:mm；留空表示不限制 */
-  dailyEnd: string;
   /** 刷新/跳转后是否自动恢复 */
   resumeOnReload: boolean;
-  /** 打开支持自动翻页的页面时自动开始 */
-  autoStart: boolean;
   /** 页面没有 video/audio 时，等待多久再翻页（毫秒） */
   contentWaitMs: number;
 }
@@ -61,9 +52,7 @@ export interface VideoSettings {
   defaultMuted: boolean;
   /** 默认播放倍速；1 表示原始速度 */
   playbackRate: number;
-  /** 媒体未播放时尝试自动播放 */
-  autoPlay: boolean;
-  /** 播放中途暂停时尝试恢复播放 */
+  /** 仅自动翻页等待媒体结束时，暂停后尝试恢复播放 */
   resumeOnPause: boolean;
 }
 
@@ -138,24 +127,18 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   autoTurn: {
     enabled: false,
-    scope: "chapter",
     waitVideoEnd: true,
     minDelayMs: 2000,
     maxDelayMs: 5000,
     maxSteps: 200,
     stopOnUnanswered: true,
     startDelayMs: 1500,
-    maxRunMinutes: 0,
-    dailyStart: "",
-    dailyEnd: "",
     resumeOnReload: true,
-    autoStart: false,
     contentWaitMs: 3000,
   },
   video: {
     defaultMuted: true,
     playbackRate: 1,
-    autoPlay: true,
     resumeOnPause: true,
   },
   solving: {

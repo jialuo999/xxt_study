@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyMediaPreferences, startMediaPreferences } from "../../src/app/media-preferences";
+import { DEFAULT_SETTINGS } from "../../src/core/settings";
+import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 
 describe("media-preferences", () => {
   beforeEach(() => {
@@ -14,7 +16,6 @@ describe("media-preferences", () => {
     const count = applyMediaPreferences(document, {
       defaultMuted: true,
       playbackRate: 1.5,
-      autoPlay: true,
       resumeOnPause: true,
     });
 
@@ -27,7 +28,6 @@ describe("media-preferences", () => {
     applyMediaPreferences(document, {
       defaultMuted: false,
       playbackRate: 1,
-      autoPlay: true,
       resumeOnPause: true,
     });
     expect(video.muted).toBe(false);
@@ -41,34 +41,47 @@ describe("media-preferences", () => {
     applyMediaPreferences(document, {
       defaultMuted: false,
       playbackRate: 99,
-      autoPlay: true,
       resumeOnPause: true,
     });
     expect(video.playbackRate).toBe(4);
     applyMediaPreferences(document, {
       defaultMuted: false,
       playbackRate: 0.01,
-      autoPlay: true,
       resumeOnPause: true,
     });
     expect(video.playbackRate).toBe(0.25);
   });
 
-  it("媒体暂停后按设置尝试恢复播放", async () => {
+  it("能穿透 Shadow DOM 找到播放器里的 video", () => {
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    const video = document.createElement("video");
+    shadow.appendChild(video);
+    document.body.appendChild(host);
+
+    const count = applyMediaPreferences(document, {
+      defaultMuted: true,
+      playbackRate: 2,
+      resumeOnPause: true,
+    });
+    expect(count).toBe(1);
+    expect(video.playbackRate).toBe(2);
+  });
+
+  it("平台重置倍速后定时重新应用设置", async () => {
     vi.useFakeTimers();
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    updateSettings({ video: { playbackRate: 1.5 } });
     const stop = startMediaPreferences();
     const video = document.createElement("video");
-    let paused = true;
-    Object.defineProperty(video, "paused", { get: () => paused, configurable: true });
-    Object.defineProperty(video, "ended", { get: () => false, configurable: true });
-    video.play = vi.fn(async () => {
-      paused = false;
-    });
     document.body.appendChild(video);
-    video.dispatchEvent(new Event("pause"));
     await vi.advanceTimersByTimeAsync(300);
-    expect(video.play).toHaveBeenCalled();
+    expect(video.playbackRate).toBe(1.5);
+    video.playbackRate = 1; // 模拟平台播放器重置
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(video.playbackRate).toBe(1.5);
     stop();
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
     vi.useRealTimers();
   });
 });

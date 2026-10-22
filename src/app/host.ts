@@ -160,12 +160,7 @@ export class HostController implements UiController {
 
     await this.initBankSafe();
     await this.refresh();
-    if (this.isAutoTurnPage()) {
-      this.autoTurn.restore();
-      if (!this.autoTurn.isRunning && getSettings().autoTurn.autoStart && getSettings().autoTurn.enabled) {
-        this.autoTurn.start();
-      }
-    }
+    if (this.isAutoTurnPage()) this.autoTurn.restore();
 
     this.urlTimer = setInterval(() => {
       if (location.href !== this.lastHref) {

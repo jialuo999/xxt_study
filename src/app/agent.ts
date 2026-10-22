@@ -205,7 +205,7 @@ export class FrameAgent {
 
   private async resumeMedia(): Promise<void> {
     const settings = getSettings();
-    if (!settings.video.autoPlay && !settings.video.resumeOnPause) return;
+    if (!settings.video.resumeOnPause) return;
     for (const media of collectMedia(document)) {
       try {
         if (media.paused && !media.ended) {

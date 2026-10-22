@@ -51,6 +51,7 @@ SOFTWARE.
 - kukuqi666/chaoxing-script-ai — https://github.com/kukuqi666/chaoxing-script-ai
 - Z-Fovik-RT/chaoxing-ai — https://github.com/Z-Fovik-RT/chaoxing-ai
 - WN14755303413/xuexiaoyi-to-xuexitong-tampermonkey-proxy — https://github.com/WN14755303413/xuexiaoyi-to-xuexitong-tampermonkey-proxy
+- Minnjee/course-helper — https://github.com/Minnjee/course-helper（参考了倍速播放的两个通用思路：定时重新断言 playbackRate、在直接查找不到时穿透 Shadow DOM 查 video；本项目为独立实现，未复制代码）
 
 ## 依赖
 

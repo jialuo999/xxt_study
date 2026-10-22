@@ -27,7 +27,6 @@ function mockVideo(options: { initialTime?: number; playSucceeds: boolean }) {
 const preferences = {
   defaultMuted: true,
   playbackRate: 1,
-  autoPlay: true,
   resumeOnPause: true,
 };
 

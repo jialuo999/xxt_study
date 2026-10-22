@@ -5,10 +5,30 @@ import { clamp } from "@/utils/async";
 const MIN_RATE = 0.25;
 const MAX_RATE = 4;
 
+function collectShadowMedia(root: ParentNode, out: HTMLMediaElement[], depth = 0): void {
+  if (depth > 3) return;
+  try {
+    const all = root.querySelectorAll<HTMLElement>("*");
+    const limit = Math.min(all.length, 800);
+    for (let index = 0; index < limit; index++) {
+      const shadow = all[index]?.shadowRoot;
+      if (!shadow) continue;
+      out.push(...Array.from(shadow.querySelectorAll<HTMLMediaElement>("video, audio")));
+      collectShadowMedia(shadow, out, depth + 1);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function collectMedia(doc: Document = document, depth = 0): HTMLMediaElement[] {
   const media: HTMLMediaElement[] = [];
   try {
     media.push(...Array.from(doc.querySelectorAll<HTMLMediaElement>("video, audio")));
+    if (media.length === 0) {
+      // 新版播放器可能把 video 放进 Shadow DOM
+      collectShadowMedia(doc, media);
+    }
   } catch {
     /* ignore */
   }
@@ -24,16 +44,29 @@ function collectMedia(doc: Document = document, depth = 0): HTMLMediaElement[] {
   return media;
 }
 
+function applyRate(media: HTMLMediaElement, rateValue: number): void {
+  const rate = clamp(Number(rateValue) || 1, MIN_RATE, MAX_RATE);
+  try {
+    if (Math.abs(media.playbackRate - rate) > 0.001) media.playbackRate = rate;
+  } catch {
+    /* 某些播放器会锁定倍速 */
+  }
+  try {
+    media.defaultPlaybackRate = rate;
+  } catch {
+    /* older browsers */
+  }
+}
+
 function applyToMedia(media: HTMLMediaElement, settings: VideoSettings): void {
   try {
-    const rate = clamp(Number(settings.playbackRate) || 1, MIN_RATE, MAX_RATE);
     if (media.muted !== settings.defaultMuted) media.muted = settings.defaultMuted;
     try {
       media.defaultMuted = settings.defaultMuted;
     } catch {
       /* older browsers */
     }
-    if (Math.abs(media.playbackRate - rate) > 0.001) media.playbackRate = rate;
+    applyRate(media, settings.playbackRate);
   } catch {
     /* 某些播放器会锁定这些属性 */
   }
@@ -50,8 +83,11 @@ export function applyMediaPreferences(
 }
 
 /**
- * 监听媒体创建与播放事件，持续应用用户的默认静音/倍速。
- * 在每个 frame 中独立启动；同一 frame 只调用一次。
+ * 监听媒体创建与播放事件，应用静音/倍速。
+ *
+ * 平台播放器经常在 loadedmetadata、切段或播放开始时把 playbackRate 重置为 1，
+ * 因此当用户选择非 1x 时，每 2 秒重新断言一次倍速（参考公开脚本的常见做法）。
+ * 暂停恢复不在这里做：只有自动翻页等待媒体结束、或宿主显式请求时才恢复。
  */
 export function startMediaPreferences(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -92,47 +128,32 @@ export function startMediaPreferences(): () => void {
   const onMediaReady = (event: Event) => {
     const target = event.target;
     if (target instanceof HTMLMediaElement) {
-      // 新 source / 播放器重建时重新应用默认值，但不持续覆盖用户手动调整
       applyToMedia(target, getSettings().video);
       initialized.add(target);
-      if (getSettings().video.autoPlay) void tryPlay(target);
     }
   };
-
-  const onPause = (event: Event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLMediaElement)) return;
-    if (!getSettings().video.resumeOnPause) return;
-    if (target.ended) return;
-    // 播放器/平台有时会在缓冲或切段时把视频暂停，稍等再尝试恢复
-    setTimeout(() => {
-      if (target.paused && !target.ended) void tryPlay(target);
-    }, 200);
-  };
-
   document.addEventListener("loadedmetadata", onMediaReady, true);
+  document.addEventListener("canplay", onMediaReady, true);
   document.addEventListener("play", onMediaReady, true);
-  document.addEventListener("pause", onPause, true);
+
+  // 学习通等播放器可能在播放中重置倍速，定时重新应用（不改静音，避免覆盖用户操作）
+  const rateTimer = setInterval(() => {
+    const rate = getSettings().video.playbackRate;
+    if (Math.abs(rate - 1) < 0.001) return;
+    for (const media of collectMedia()) applyRate(media, rate);
+  }, 2000);
 
   const unsubscribe = subscribeSettings(() => applyAll());
 
   return () => {
     if (timer) clearTimeout(timer);
+    clearInterval(rateTimer);
     observer.disconnect();
     document.removeEventListener("loadedmetadata", onMediaReady, true);
+    document.removeEventListener("canplay", onMediaReady, true);
     document.removeEventListener("play", onMediaReady, true);
-    document.removeEventListener("pause", onPause, true);
     unsubscribe();
   };
-}
-
-async function tryPlay(media: HTMLMediaElement): Promise<void> {
-  try {
-    if (getSettings().video.defaultMuted) media.muted = true;
-    await media.play();
-  } catch {
-    /* 浏览器自动播放策略可能拒绝；由自动翻页层提示手动播放 */
-  }
 }
 
 export { collectMedia };
