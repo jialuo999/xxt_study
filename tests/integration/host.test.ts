@@ -238,6 +238,53 @@ describe("HostController 集成", () => {
     controller.dispose();
   });
 
+  it("当前视频未播完时固定当前目标，避免任务快照抖动导致来回切换", async () => {
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    const fakeChild = (frameId: string, url: string) =>
+      ({
+        frameId,
+        source: { closed: false, postMessage: () => undefined } as unknown as Window,
+        token: frameId,
+        nonce: "",
+        url,
+        title: "",
+        pageKind: "video",
+        questions: [],
+        lastSeen: Date.now(),
+      }) as never;
+
+    const host = controller as unknown as {
+      children: Map<string, unknown>;
+      childMedia: Map<string, unknown>;
+      activeMediaFrameId: string;
+      getMediaPlaybackTarget: () => { frameId: string | null } | null;
+    };
+    host.children.set("a", fakeChild("a", "https://x/video?jobid=1"));
+    host.children.set("b", fakeChild("b", "https://x/video?jobid=2"));
+    host.children.set("c", fakeChild("c", "https://x/content"));
+    const mediaState = { hasMedia: true, allEnded: false, anyPaused: false };
+    host.childMedia.set("a", { state: mediaState, at: Date.now() });
+    host.childMedia.set("b", { state: mediaState, at: Date.now() });
+    host.childMedia.set("c", {
+      state: {
+        hasMedia: false,
+        allEnded: false,
+        anyPaused: false,
+        taskTotal: 2,
+        nextTaskUrl: "https://x/video?jobid=2",
+        tasks: [
+          { index: 0, finished: false, url: "https://x/video?jobid=1" },
+          { index: 1, finished: false, url: "https://x/video?jobid=2" },
+        ],
+      },
+      at: Date.now(),
+    });
+    host.activeMediaFrameId = "a";
+
+    expect(host.getMediaPlaybackTarget()?.frameId).toBe("a");
+    controller.dispose();
+  });
   it("切换播放目标时暂停旧目标、恢复新目标，不启动播放守卫", async () => {
     const { HostController } = await import("../../src/app/host");
     const controller = new HostController();

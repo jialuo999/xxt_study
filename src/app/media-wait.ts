@@ -19,7 +19,19 @@ export function findMedia(doc: Document): HTMLMediaElement[] {
 /** 媒体所在任务点是否已完成（学习通 .ans-job-finished） */
 function isTaskPointFinished(media: HTMLMediaElement): boolean {
   try {
-    return Boolean(media.closest(".ans-job-finished"));
+    if (media.closest(".ans-job-finished")) return true;
+    // 部分版本把完成标记放在任务项内部的另一个节点，而不是媒体祖先上
+    const doc = media.ownerDocument;
+    let node: HTMLElement | null = media.parentElement;
+    for (let depth = 0; node && depth < 5; depth += 1) {
+      if (node === doc.body || node === doc.documentElement) break;
+      if (node.classList.contains("ans-job-finished")) return true;
+      if (node.querySelectorAll(".ans-job-icon").length === 1) {
+        if (node.querySelector(".ans-job-finished")) return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
   } catch {
     return false;
   }

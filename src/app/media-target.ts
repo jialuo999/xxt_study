@@ -140,7 +140,10 @@ interface SelectTargetArgs {
 }
 
 /** 任务点信息不足时，按子 frame 顺序逐个激活，避免所有视频一起播放 */
-function fallbackMediaTarget(args: SelectTargetArgs): MediaPlaybackTarget | null {
+function fallbackMediaTarget(
+  args: SelectTargetArgs,
+  finishedTaskUrls: ReadonlySet<string> = new Set(),
+): MediaPlaybackTarget | null {
   const now = args.now ?? Date.now();
   const frames = args.children
     .map((child) => ({ child, entry: args.childMedia.get(child.frameId) }))
@@ -151,6 +154,7 @@ function fallbackMediaTarget(args: SelectTargetArgs): MediaPlaybackTarget | null
         if (!item.entry) return false;
         if (now - item.entry.at >= MEDIA_STATE_FRESH_MS) return false;
         if (!item.entry.state.hasMedia) return false;
+        if (finishedTaskUrls.has(taskUrlKey(item.child.url))) return false;
         return isStateForChapter(item.entry.state, item.child.url, args.chapterId ?? "");
       },
     )
@@ -215,6 +219,11 @@ export function selectMediaPlaybackTarget(args: SelectTargetArgs): MediaPlayback
 
   if (taskEntry) {
     const state = taskEntry[1].state;
+    const finishedTaskUrls = new Set(
+      (state.tasks ?? [])
+        .filter((task) => task.finished && task.url)
+        .map((task) => taskUrlKey(task.url!)),
+    );
     if (state.allTasksFinished) {
       return {
         frameId: null,
@@ -241,6 +250,7 @@ export function selectMediaPlaybackTarget(args: SelectTargetArgs): MediaPlayback
         };
       }
     }
+    return fallbackMediaTarget(args, finishedTaskUrls);
   }
 
   return fallbackMediaTarget(args);

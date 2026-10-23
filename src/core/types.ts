@@ -58,6 +58,15 @@ export interface SolveResult {
   costTokens?: number;
 }
 
+/** 学习通任务点快照（用于跨 frame 跳过已完成任务） */
+export interface TaskPointInfo {
+  /** 从 0 开始的 DOM 顺序 */
+  index: number;
+  finished: boolean;
+  /** 任务点 iframe 的绝对 URL；阅读类任务可能没有 */
+  url?: string;
+}
+
 /** 媒体播放状态（跨 frame 汇总用） */
 export interface MediaState {
   hasMedia: boolean;
@@ -75,6 +84,8 @@ export interface MediaState {
   nextTaskIndex?: number;
   /** 当前页任务点总数 */
   taskTotal?: number;
+  /** 全部任务点快照；没有 nextTaskUrl 时也能判断哪些 iframe 已完成 */
+  tasks?: TaskPointInfo[];
 }
 
 /** 页面信息 */

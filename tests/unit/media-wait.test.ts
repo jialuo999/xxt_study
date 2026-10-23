@@ -95,6 +95,24 @@ describe("waitForMedia", () => {
     await expect(promise).resolves.toBe("done");
   });
 
+  it("完成标记在任务项内部时也能跳过该媒体", async () => {
+    const finished = mockVideo({ playSucceeds: true });
+    const item = document.createElement("div");
+    item.innerHTML = '<i class="ans-job-icon"></i><span class="ans-job-finished"></span>';
+    item.appendChild(finished);
+    document.body.prepend(item);
+
+    const active = mockVideo({ playSucceeds: true });
+    const promise = waitForMedia(document, 10000, () => true, preferences);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(active.play).toHaveBeenCalled();
+    expect(finished.play).not.toHaveBeenCalled();
+
+    finishMedia(active);
+    await vi.advanceTimersByTimeAsync(3000);
+    await expect(promise).resolves.toBe("done");
+  });
+
   it("播放结束后播放器立即循环，也能识别为完成", async () => {
     const video = document.createElement("video");
     let paused = false;

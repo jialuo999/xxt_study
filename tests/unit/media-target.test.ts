@@ -121,6 +121,42 @@ describe("media-target", () => {
     expect(target?.frameId).toBe("b");
   });
 
+  it("任务点快照里已完成的 iframe 在兜底时也会被跳过", () => {
+    const children = [
+      child("a", "https://x/video?jobid=1"),
+      child("b", "https://x/video?jobid=2"),
+      child("c", "https://x/content"),
+    ];
+    const childMedia = new Map([
+      ["a", mediaEntry(state({ hasMedia: true }), 2000)],
+      ["b", mediaEntry(state({ hasMedia: true }), 2000)],
+      [
+        "c",
+        mediaEntry(
+          state({
+            hasMedia: false,
+            taskTotal: 2,
+            // 故意给一个匹配不到的 nextTaskUrl，强制走 frame 兜底
+            nextTaskUrl: "https://x/video?jobid=missing",
+            tasks: [
+              { index: 0, finished: true, url: "https://x/video?jobid=1" },
+              { index: 1, finished: false, url: "https://x/video?jobid=2" },
+            ],
+          }),
+          2000,
+        ),
+      ],
+    ]);
+    const target = selectMediaPlaybackTarget({
+      children,
+      childMedia,
+      chapterId: "",
+      now: 2500,
+    });
+    expect(target?.source).toBe("frames");
+    expect(target?.frameId).toBe("b");
+  });
+
   it("summarizeChildMediaState 只汇总当前章节的媒体，旧章节的 allEnded 不生效", () => {
     const children = [
       child("a", "https://x/content?knowledgeId=current"),

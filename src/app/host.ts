@@ -1146,11 +1146,39 @@ export class HostController implements UiController {
    * 具体的选择/章节过滤逻辑在 `media-target.ts` 的纯函数中，便于单测。
    */
   getMediaPlaybackTarget(): MediaPlaybackTarget | null {
-    return selectMediaPlaybackTarget({
+    const target = selectMediaPlaybackTarget({
       children: this.liveChildren(),
       childMedia: this.childMedia,
       chapterId: this.currentChapterId(),
     });
+    return this.pinActiveMediaTarget(target);
+  }
+
+  /**
+   * 当前目标还在播放且任务点未完成时，不因为任务点快照抖动而切走。
+   * 媒体切换本身会暂停/恢复播放器，目标来回跳就是“切换抖动”的主要来源。
+   */
+  private pinActiveMediaTarget(
+    target: MediaPlaybackTarget | null,
+  ): MediaPlaybackTarget | null {
+    const activeId = this.activeMediaFrameId;
+    if (!activeId) return target;
+    const entry = this.childMedia.get(activeId);
+    const child = this.children.get(activeId);
+    if (!entry || !child || Date.now() - entry.at >= 3500) return target;
+    const state = entry.state;
+    if (!state.hasMedia || state.allEnded || state.currentTaskFinished) return target;
+    if (target?.frameId === activeId) return target;
+    // 当前视频还没播完/任务点没完成，先保持当前目标
+    return {
+      frameId: activeId,
+      taskUrl: child.url,
+      taskIndex: target?.taskIndex ?? 0,
+      taskTotal: target?.taskTotal ?? 1,
+      state,
+      allTasksFinished: false,
+      source: target?.source ?? "frames",
+    };
   }
 
   /**

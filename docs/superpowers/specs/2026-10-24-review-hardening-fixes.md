@@ -86,6 +86,15 @@
 - 播放守卫为 Shadow DOM 内的媒体补挂 `pause/play/ended` 监听（这些事件不会 composed 冒泡到 document），并用 `composedPath`、宿主 `shadowRoot` 与系统媒体键识别人工暂停；
 - 守卫启动前已暂停且有播放进度的媒体视为用户暂停，先尊重 30 秒。
 
+## 8.1 跳过已完成任务与切换防抖
+
+- `collectTaskPointState` 兼容完成标记在 `.ans-job-icon` 自身、父级、任务项内部三种结构，并上报全部任务点快照 `tasks`；
+- Host 兜底选目标时用 `tasks` 快照跳过已完成 iframe，不再只依赖 `nextTaskUrl`；
+- `pinActiveMediaTarget`：当前目标视频未播完且任务点未完成时，不因任务快照抖动切走；
+- 本地多媒体等待兼容完成标记在任务项内部，并避免上溯到 body 把整页媒体误判为已完成；
+- `waitForTaskMedia` 不再每 500ms 无条件 `RESUME`，只在目标切换或暂停重试时发；
+- 去掉 `video.click()` 兜底，避免点击切换播放/暂停造成抖动。
+
 ## 9. 播放抖动
 
 - `waitForTaskMedia` 不再每 500ms 无条件 `activateMediaFrame`：只在目标切换时激活；
@@ -103,6 +112,7 @@
 
 - 新增/更新：任务点兜底顺序、restore 返回 false、锁释放、目标 frame 守卫消息顺序、手动填写二次确认、复核模式 autoConfirm=false、长题干、诊断 baseUrl/模板脱敏、Shadow DOM 媒体、系统媒体键、启动前暂停；
 - `npm run typecheck` 通过；
-- `npm test`：28 文件 / 340 条通过；
+- `npm test`：28 文件 / 345 条通过；
 - `npm run test:sandbox` 通过；
 - `npm run build` 通过。
+

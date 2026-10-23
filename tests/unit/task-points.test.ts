@@ -51,6 +51,39 @@ describe("collectTaskPointState", () => {
     expect(state.nextTaskUrl).toContain("/video-2");
   });
 
+  it("兼容完成标记在 icon 自身或任务项内部的结构", () => {
+    document.body.innerHTML = `
+      <div class="task">
+        <i class="ans-job-icon ans-job-finished"></i>
+        <iframe src="/video-1"></iframe>
+      </div>
+      <div class="task">
+        <i class="ans-job-icon"></i>
+        <span class="ans-job-finished"></span>
+        <iframe src="/video-2"></iframe>
+      </div>
+    `;
+    const state = collectTaskPointState(document);
+    expect(state.tasks).toEqual([
+      { index: 0, finished: true, url: expect.stringContaining("/video-1") },
+      { index: 1, finished: true, url: expect.stringContaining("/video-2") },
+    ]);
+    expect(state.allTasksFinished).toBe(true);
+    expect(state.nextTaskUrl).toBeUndefined();
+  });
+
+  it("返回全部任务点快照，供 Host 跳过已完成任务", () => {
+    document.body.innerHTML = "";
+    taskItem({ finished: true, video: "/video-1" });
+    taskItem({ finished: false, video: "/video-2" });
+
+    const state = collectTaskPointState(document);
+    expect(state.tasks).toHaveLength(2);
+    expect(state.tasks?.[0].finished).toBe(true);
+    expect(state.tasks?.[1].finished).toBe(false);
+    expect(state.tasks?.[1].url).toContain("/video-2");
+  });
+
   it("没有任务点标记时返回空状态", () => {
     document.body.innerHTML = "";
     const state = collectTaskPointState(document);
