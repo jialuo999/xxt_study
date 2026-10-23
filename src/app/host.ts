@@ -659,7 +659,12 @@ export class HostController implements UiController {
 
     if (view.detected) {
       if (!previous) {
-        logger.warn("verify", "检测到平台人机验证，自动翻页已暂停", { message: view.message });
+        logger.warn("verify", "检测到平台人机验证，自动翻页已暂停", {
+          message: view.message,
+          reason: view.reason,
+          pageKind: this.state.page.kind,
+          url: location.pathname,
+        });
       }
       if (this.autoTurn.isRunning) {
         this.autoTurn.stop("检测到平台验证，自动翻页已暂停；请手动完成验证后重新开始");

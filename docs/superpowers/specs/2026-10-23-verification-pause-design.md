@@ -23,9 +23,12 @@
 
 新增 `detectVerificationChallenge(doc)`：
 
-- 命中 `【9010】`、`操作异常 + 验证码`、`请输入图片中的验证码`，或带 `验证码` 文案的 captcha 输入框；
-- 只读取顶层文档的 light DOM（`textContent`），不读取 Shadow DOM 中的面板 UI，避免把面板自己的“验证码”提示误判为平台验证页；
-- 普通页面提到“验证码”（如使用须知）不会误报。
+- 命中 `【9010】`、`操作异常 + 验证码`、`请输入图片中的验证码`，或 `验证码` 文案 + 可见的 captcha 输入框/图片；
+- 只读取**可见的 light DOM**：
+  - 浏览器用 `body.innerText`（排除隐藏元素、script/style、Shadow DOM 中的面板 UI）；
+  - jsdom 环境回退到 light DOM 遍历，跳过 `script/style/template/noscript` 与 `display:none` / `visibility:hidden` / `opacity:0` / `aria-hidden` 的节点；
+- 必须同时看到可见的验证码输入框或图片，避免把隐藏登录弹层、脚本模板里的“验证码”文案当成真实验证页；
+- 修复反馈「没弹出人机验证也提示」：旧版直接读取 `textContent`，会把学习通页面里的隐藏验证码模板/脚本字符串误判为验证页。
 
 ### 2.2 Host 行为
 
@@ -65,3 +68,4 @@
 
 - 如果 9010 页面只出现在跨域 iframe 内，顶层文档无法读取其 DOM；此时自动翻页会在签名不变后停止，不会无限点击。后续可由子 frame 上报验证状态。
 - 识别文案依赖学习通当前页面文本；平台改文案时需要更新正则。
+- 可见性判断不依赖布局矩形，避免 jsdom 与首屏未渲染时失效；如果平台把验证码表单用 `position:absolute; left:-9999px` 隐藏，仍可能被 `innerText` 计入，需要再补充视口/尺寸判断。
