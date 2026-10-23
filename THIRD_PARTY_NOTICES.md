@@ -43,6 +43,51 @@ SOFTWARE.
 - 许可：MIT（上游 fork）
 - 参考内容：同上，作为 cxmooc-tools 的镜像/分支查阅。
 
+### photopea/Typr.js
+
+- 链接：https://github.com/photopea/Typr.js
+- 许可：MIT
+- 使用方式：以压缩后的 `Typr.js` + `Typr.U.js` 形式内置在 `src/platform/chaoxing/font/typr-md5.ts`，用于解析学习通页面内嵌的 TTF 字体、读取字形轮廓。
+
+### blueimp-md5
+
+- 链接：https://github.com/blueimp/JavaScript-MD5
+- 许可：MIT
+- 使用方式：以压缩形式与 Typr 一起内置，用于计算字形路径的 MD5 映射。
+
+### 学习通字形映射表
+
+- 来源：`https://www.forestpolice.org/ttf/2.0/table.json`（经 ScriptCat 脚本“超星学习通考试/测验题目提取”引用）
+- 许可：未声明；本项目仅将其作为字体反爬解码用的字形 → Unicode 数据表内置，不包含可执行代码。
+- 使用方式：`src/platform/chaoxing/font/table.json`，配合 Typr 字形轮廓 MD5 还原题目文字。
+
+MIT License (Typr.js / blueimp-md5)
+
+```text
+MIT License
+
+Copyright (c) 2014 photopea
+Copyright (c) 2011-2023 blueimp
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## 产品功能灵感（未使用代码）
 
 以下项目没有声明开源许可（或未声明许可），因此**仅阅读其功能描述作为产品灵感，没有复制任何代码、选择器常量或资源**：

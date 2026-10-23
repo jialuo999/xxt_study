@@ -5,7 +5,7 @@ import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { jitter, sleep } from "@/utils/async";
 import { logger } from "@/core/logger";
 import type { AutoTurnView } from "@/ui/contract";
-import { collectMedia, focusMedia } from "./media-preferences";
+import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
 
 const SESSION_KEY = "study-helper.autoturn.v1";
 const MEDIA_WAIT_TIMEOUT = 45 * 60 * 1000;
@@ -24,6 +24,8 @@ export interface AutoTurnHost {
   hasUnansweredQuestions(): boolean;
   getChildMediaState(): MediaState | null;
   resumeChildMedia(): void;
+  /** 停止翻页时暂停当前页面/子 frame 的视频与音频 */
+  pauseMedia(): void;
   /** 顶层 URL + 子 frame URL/类型的稳定签名，用于判断任务点是否切换 */
   getTaskSignature(): string;
   onState(state: AutoTurnView): void;
@@ -76,6 +78,12 @@ export class AutoTurnRunner {
   }
 
   stop(reason = "已停止自动翻页"): void {
+    // 停止翻页后立即暂停视频/音频，避免声音继续播放
+    try {
+      this.host.pauseMedia();
+    } catch {
+      /* ignore */
+    }
     if (!this.running) {
       this.emit(reason, true);
       return;
@@ -374,17 +382,17 @@ export async function waitForMedia(
   isAlive: () => boolean,
   preferences: VideoSettings = getSettings().video,
 ): Promise<MediaWaitResult> {
-  let media = findMedia(doc);
-  if (media.length === 0 && doc.querySelector("iframe")) {
+  let allMedia = findMedia(doc);
+  if (allMedia.length === 0 && doc.querySelector("iframe")) {
     // 章节页 iframe 可能尚未加载完，给播放器一点出现时间
     for (let attempt = 0; attempt < 10; attempt++) {
       if (!isAlive()) return "none";
       await sleep(500);
-      media = findMedia(doc);
-      if (media.length > 0) break;
+      allMedia = findMedia(doc);
+      if (allMedia.length > 0) break;
     }
   }
-  if (media.length === 0) return "none";
+  if (allMedia.length === 0) return "none";
 
   const started = Date.now();
   const pausedSince = new Map<HTMLMediaElement, number>();
@@ -449,8 +457,6 @@ export async function waitForMedia(
     document.removeEventListener("timeupdate", onFinishEvent, true);
   };
 
-  const allDone = () => media.every((element) => isFinished(element));
-
   const tryResume = async (element: HTMLMediaElement, now: number) => {
     let paused = false;
     try {
@@ -458,7 +464,7 @@ export async function waitForMedia(
     } catch {
       return;
     }
-    if (!paused || allDone()) {
+    if (!paused || isFinished(element)) {
       pausedSince.delete(element);
       return;
     }
@@ -490,46 +496,48 @@ export async function waitForMedia(
       cleanup();
       return "none";
     }
-    media = media.filter((element) => element.isConnected);
-    if (media.length === 0) {
+    // 多视频/音频页面只跟踪主播放器，避免隐藏的预加载元素让等待永远不结束
+    const connected = findMedia(doc).filter((element) => element.isConnected);
+    const primary = pickPrimaryMedia(connected);
+    if (!primary) {
       cleanup();
       return "none";
     }
-    if (allDone()) {
+    if (isFinished(primary)) {
       // 等一小段时间再确认：播放器可能在结束后自动播放下一个分段/重新循环
       await sleep(1200);
       if (!isAlive()) {
         cleanup();
         return "none";
       }
-      media = media.filter((element) => element.isConnected);
-      if (media.length === 0) {
+      const nextConnected = findMedia(doc).filter((element) => element.isConnected);
+      const nextPrimary = pickPrimaryMedia(nextConnected);
+      if (!nextPrimary) {
         cleanup();
         return "none";
       }
-      if (allDone()) {
+      if (isFinished(nextPrimary)) {
         cleanup();
         return "done";
       }
+      continue;
     }
 
     const now = Date.now();
     if (preferences.resumeOnPause) {
-      for (const element of media) await tryResume(element, now);
+      await tryResume(primary, now);
 
-      for (const element of media) {
-        let paused = false;
-        try {
-          paused = element.paused;
-        } catch {
-          continue;
-        }
-        if (!paused) {
-          pausedSince.delete(element);
-          continue;
-        }
-        if (!pausedSince.has(element)) pausedSince.set(element, now);
-        const pausedFor = now - (pausedSince.get(element) ?? now);
+      let paused = false;
+      try {
+        paused = primary.paused;
+      } catch {
+        paused = false;
+      }
+      if (!paused) {
+        pausedSince.delete(primary);
+      } else {
+        if (!pausedSince.has(primary)) pausedSince.set(primary, now);
+        const pausedFor = now - (pausedSince.get(primary) ?? now);
         if (pausedFor > 5000) {
           cleanup();
           return "blocked";

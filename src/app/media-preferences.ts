@@ -54,6 +54,36 @@ function collectMedia(doc: Document = document, depth = 0): HTMLMediaElement[] {
   return media;
 }
 
+/** 多视频/音频页面里选出“当前主播放器”：优先正在播放，其次可见面积最大 */
+export function pickPrimaryMedia(media: HTMLMediaElement[]): HTMLMediaElement | null {
+  let best: HTMLMediaElement | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const element of media) {
+    let score = 0;
+    try {
+      const rect = element.getBoundingClientRect();
+      score += Math.max(0, rect.width) * Math.max(0, rect.height);
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (!element.paused && !element.ended) score += 1e9;
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (element.currentTime > 0) score += 1e6;
+    } catch {
+      /* ignore */
+    }
+    if (score > bestScore) {
+      best = element;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 function applyRate(media: HTMLMediaElement, rateValue: number): void {
   const rate = clamp(Number(rateValue) || 1, MIN_RATE, MAX_RATE);
   try {

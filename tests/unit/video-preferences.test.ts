@@ -3,6 +3,7 @@ import {
   applyMediaPreferences,
   collectMedia,
   focusMedia,
+  pickPrimaryMedia,
   startMediaPreferences,
 } from "../../src/app/media-preferences";
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../../src/core/settings";
@@ -111,6 +112,18 @@ describe("media-preferences", () => {
     focusMedia(video);
     expect(document.activeElement).toBe(video);
     expect(events).toEqual(["mouseover", "mousemove"]);
+  });
+
+  it("多视频时优先选择正在播放的那个", () => {
+    const pausedVideo = document.createElement("video");
+    const playingVideo = document.createElement("video");
+    document.body.append(pausedVideo, playingVideo);
+    Object.defineProperty(pausedVideo, "paused", { get: () => true, configurable: true });
+    Object.defineProperty(pausedVideo, "ended", { get: () => false, configurable: true });
+    Object.defineProperty(playingVideo, "paused", { get: () => false, configurable: true });
+    Object.defineProperty(playingVideo, "ended", { get: () => false, configurable: true });
+
+    expect(pickPrimaryMedia([pausedVideo, playingVideo])).toBe(playingVideo);
   });
 
   it("平台重置倍速后定时重新应用设置", async () => {

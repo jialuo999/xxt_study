@@ -52,6 +52,7 @@ import type {
   UiState,
 } from "@/ui/contract";
 import { AutoTurnRunner } from "./autoturn";
+import { collectMedia } from "./media-preferences";
 
 const NOTICE_KEY = "study-helper.notice.v1";
 
@@ -163,6 +164,7 @@ export class HostController implements UiController {
       hasUnansweredQuestions: () => this.hasUnansweredQuestions(),
       getChildMediaState: () => this.getChildMediaState(),
       resumeChildMedia: () => this.resumeChildMedia(),
+      pauseMedia: () => this.pauseMedia(),
       getTaskSignature: () => this.getTaskSignature(),
       onState: (autoTurn) => this.patch({ autoTurn }),
       onStopped: (reason) => {
@@ -924,6 +926,20 @@ export class HostController implements UiController {
       /* ignore */
     }
     return `${taskUrlKey(location.href)}|${this.state.page.kind}|${current}|${frames}`;
+  }
+
+  /** 停止自动翻页时暂停所有视频/音频 */
+  pauseMedia(): void {
+    for (const media of collectMedia(document)) {
+      try {
+        if (!media.paused) media.pause();
+      } catch {
+        /* ignore */
+      }
+    }
+    for (const child of this.children.values()) {
+      sendToWindow(child.source, createMessage({ t: "PAUSE_MEDIA", token: child.token }));
+    }
   }
 
   /** 请求子 frame 恢复暂停的媒体播放 */

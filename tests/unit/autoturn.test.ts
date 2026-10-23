@@ -44,6 +44,7 @@ function makeHost(options: {
     hasUnansweredQuestions: () => false,
     getChildMediaState: () => null,
     resumeChildMedia: () => undefined,
+    pauseMedia: () => undefined,
     getTaskSignature: options.signature,
     onState: (state) => states.push(state),
     onStopped: (reason) => stopped.push(reason),
@@ -84,11 +85,13 @@ describe("AutoTurnRunner 翻页校验", () => {
       },
     });
     const runner = new AutoTurnRunner(host);
+    const pauseSpy = vi.spyOn(host, "pauseMedia");
     runner.start();
     await vi.advanceTimersByTimeAsync(3000);
     runner.stop("测试结束");
 
     expect(host.nextPage).toHaveBeenCalledTimes(1);
+    expect(pauseSpy).toHaveBeenCalled();
     expect(host.stopped.some((reason) => reason.includes("最大步数"))).toBe(true);
     const lastState = host.states.at(-1) as AutoTurnView;
     expect(lastState.steps).toBe(1);

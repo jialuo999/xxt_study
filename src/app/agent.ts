@@ -10,7 +10,7 @@ import { logger } from "@/core/logger";
 import { getAdapter } from "@/platform/registry";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { frameId as getFrameId } from "./frames";
-import { collectMedia, focusMedia } from "./media-preferences";
+import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
 
 const UNKNOWN: PageInfo = {
   kind: "unknown",
@@ -154,6 +154,9 @@ export class FrameAgent {
       case "RESUME_MEDIA":
         void this.resumeMedia();
         break;
+      case "PAUSE_MEDIA":
+        this.pauseMedia();
+        break;
       default:
         break;
     }
@@ -261,16 +264,18 @@ export class FrameAgent {
   private reportMediaState(): void {
     if (!this.token || this.disposed) return;
     try {
-      const media = collectMedia(document);
-      const hasMedia = media.length > 0;
-      const allEnded = hasMedia && media.every((element) => this.isMediaFinished(element));
-      const anyPaused = media.some((element) => {
+      // 多视频页面只跟踪主播放器，避免隐藏的预加载/广告元素让等待永远不结束
+      const primary = pickPrimaryMedia(collectMedia(document));
+      const hasMedia = primary != null;
+      const allEnded = primary ? this.isMediaFinished(primary) : false;
+      let anyPaused = false;
+      if (primary) {
         try {
-          return element.paused && !element.ended;
+          anyPaused = primary.paused && !primary.ended;
         } catch {
-          return false;
+          anyPaused = false;
         }
-      });
+      }
       const taskState = this.taskPointState();
       sendToWindow(
         this.hostWindow,
@@ -286,28 +291,42 @@ export class FrameAgent {
     }
   }
 
+  private pauseMedia(): void {
+    for (const media of collectMedia(document)) {
+      try {
+        if (!media.paused) media.pause();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.reportMediaState();
+  }
+
   private async resumeMedia(): Promise<void> {
     const settings = getSettings();
     if (!settings.video.resumeOnPause) return;
-    for (const media of collectMedia(document)) {
-      try {
-        if (media.paused && !media.ended) {
-          focusMedia(media);
-          if (settings.video.defaultMuted) media.muted = true;
+    const primary = pickPrimaryMedia(collectMedia(document));
+    if (!primary) {
+      this.reportMediaState();
+      return;
+    }
+    try {
+      if (primary.paused && !primary.ended) {
+        focusMedia(primary);
+        if (settings.video.defaultMuted) primary.muted = true;
+        try {
+          await primary.play();
+        } catch {
           try {
-            await media.play();
+            primary.click();
+            await primary.play();
           } catch {
-            try {
-              media.click();
-              await media.play();
-            } catch {
-              /* 浏览器可能拒绝自动播放 */
-            }
+            /* 浏览器可能拒绝自动播放 */
           }
         }
-      } catch {
-        /* 浏览器可能拒绝自动播放 */
       }
+    } catch {
+      /* 浏览器可能拒绝自动播放 */
     }
     this.reportMediaState();
   }

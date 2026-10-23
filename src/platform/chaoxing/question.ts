@@ -12,6 +12,7 @@
 import type { Option, Question, QuestionType } from "../../core/types";
 import { hashString, normalizeOption, normalizeText, parseJudge } from "../../utils/text";
 import { queryAll, queryFirst, textOf } from "../../utils/dom";
+import { decodeObfuscatedText } from "./font/decoder";
 import {
   BLANK_SELECTORS,
   OPTION_HOLDER_SELECTOR,
@@ -125,12 +126,15 @@ export function findQuestionContainers(doc: Document): HTMLElement[] {
 }
 
 function extractStem(container: HTMLElement): string {
+  const doc = container.ownerDocument;
   for (const selector of STEM_SELECTORS) {
-    const text = cleanStem(textOf(queryFirst<HTMLElement>(container, [selector])));
+    const text = cleanStem(
+      decodeObfuscatedText(textOf(queryFirst<HTMLElement>(container, [selector])), doc),
+    );
     if (text) return text;
   }
   const fallback = queryFirst<HTMLElement>(container, [":scope > .clearfix", "h1", "h2", "h3"]);
-  return cleanStem(textOf(fallback));
+  return cleanStem(decodeObfuscatedText(textOf(fallback), doc));
 }
 
 function bracketType(text: string): QuestionType | null {
@@ -140,14 +144,21 @@ function bracketType(text: string): QuestionType | null {
 
 /** 题型标签优先判定（单选/多选/判断/填空/简答） */
 export function detectTypeLabel(container: HTMLElement): QuestionType | null {
+  const doc = container.ownerDocument;
   for (const selector of TYPE_LABEL_SELECTORS) {
-    const text = textOf(queryFirst<HTMLElement>(container, [selector]));
+    const text = decodeObfuscatedText(
+      textOf(queryFirst<HTMLElement>(container, [selector])),
+      doc,
+    );
     if (!text) continue;
     const type = bracketType(text) ?? typeFromText(text);
     if (type) return type;
   }
   for (const selector of TITLE_SELECTORS) {
-    const text = textOf(queryFirst<HTMLElement>(container, [selector]));
+    const text = decodeObfuscatedText(
+      textOf(queryFirst<HTMLElement>(container, [selector])),
+      doc,
+    );
     if (!text) continue;
     const type = bracketType(text);
     if (type) return type;
@@ -156,13 +167,18 @@ export function detectTypeLabel(container: HTMLElement): QuestionType | null {
 }
 
 function cleanOptionText(holder: HTMLElement, input: HTMLInputElement | null): string {
-  const own = normalizeOption(textOf(holder));
+  const doc = holder.ownerDocument;
+  const own = normalizeOption(decodeObfuscatedText(textOf(holder), doc));
   if (own) return own;
   const parent = holder.parentElement;
-  const fromParent = parent ? normalizeOption(textOf(parent)) : "";
+  const fromParent = parent
+    ? normalizeOption(decodeObfuscatedText(textOf(parent), doc))
+    : "";
   if (fromParent) return fromParent;
   if (input) {
-    const fromSibling = normalizeOption(textOf(input.nextElementSibling));
+    const fromSibling = normalizeOption(
+      decodeObfuscatedText(textOf(input.nextElementSibling), doc),
+    );
     if (fromSibling) return fromSibling;
   }
   return "";
@@ -221,7 +237,9 @@ export function extractOptions(container: HTMLElement): DomOption[] {
   for (const holder of holders) {
     if (holder.querySelector("input[type='radio'], input[type='checkbox']")) continue;
     const hasImage = Boolean(holder.querySelector("img"));
-    const text = normalizeOption(textOf(holder));
+    const text = normalizeOption(
+      decodeObfuscatedText(textOf(holder), holder.ownerDocument),
+    );
     if (!text && !hasImage) continue;
     options.push({
       key: deriveTextOptionKey(holder, index),

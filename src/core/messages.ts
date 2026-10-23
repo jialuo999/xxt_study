@@ -42,6 +42,7 @@ export type FrameMessage =
   | (BaseMessage & { t: "SUBMIT_RESULT"; token: string; frameId: string; result: SubmitResult })
   | (BaseMessage & { t: "MEDIA_STATE"; token: string; frameId: string; state: MediaState })
   | (BaseMessage & { t: "RESUME_MEDIA"; token: string })
+  | (BaseMessage & { t: "PAUSE_MEDIA"; token: string })
   | (BaseMessage & { t: "NEXT"; token: string })
   | (BaseMessage & { t: "COLLECT"; token: string })
   | (BaseMessage & { t: "PING"; token: string })
