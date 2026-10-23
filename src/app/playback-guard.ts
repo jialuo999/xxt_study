@@ -275,13 +275,13 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
       onResumed(media);
       return;
     } catch {
-      /* 首次 play 被拒：走 focus + click 回退 */
+      /* 首次 play 被拒：走 focus 回退 */
     }
     // 期间状态已变化（可能已被用户/平台恢复，或进入人工暂停/结束），不再重试也不计失败
     if (!shouldResume(media)) return;
     try {
       focusMedia(media);
-      media.click();
+      // 不使用 click 兜底：video 的 click 会切换播放/暂停，连续重试会造成画面抖动。
       await media.play();
       onResumed(media);
     } catch {

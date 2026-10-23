@@ -87,12 +87,19 @@
 - 播放守卫为 Shadow DOM 内的媒体补挂 `pause/play/ended` 监听（这些事件不会 composed 冒泡到 document），并用 `composedPath`、宿主 `shadowRoot` 与系统媒体键识别人工暂停；
 - 守卫启动前已暂停且有播放进度的媒体视为用户暂停，先尊重 30 秒。
 
-## 9. 提交结果 URL
+## 9. 播放抖动
+
+- `waitForTaskMedia` 不再每 500ms 无条件 `activateMediaFrame`：只在目标切换时激活；
+- 目标暂停时最多每 5 秒重试一次 `RESUME`，不再高频 `play()`；
+- `waitForExternalMedia` 的 `resumeChildMedia()` 从每 500ms 降到最多每 3 秒一次；
+- 移除所有 `video.click()` 兜底（`media-wait` / `agent` / `playback-guard`）：点击 video 会切换播放/暂停，连续重试就是抖动的直接来源；现在只做 focus + `play()`，失败后交给 blocked/手动提示。
+
+## 10. 提交结果 URL
 
 - 结果页判定只看 `pathname`，避免把 `?success=0` 等失败 query 当成成功；
 - 补充 `/work/selectWorkQuestion` 结果路由。
 
-## 10. 验证
+## 11. 验证
 
 - 新增/更新：任务点兜底顺序、restore 返回 false、锁释放、目标 frame 守卫消息顺序、手动填写二次确认、复核模式 autoConfirm=false、长题干、诊断 baseUrl/模板脱敏、Shadow DOM 媒体、系统媒体键、启动前暂停；
 - `npm run typecheck` 通过；

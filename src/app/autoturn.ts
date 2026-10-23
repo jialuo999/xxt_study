@@ -470,10 +470,10 @@ export class AutoTurnRunner {
       endedSince = 0;
 
       const frameChanged = target.frameId !== lastFrameId;
-      lastFrameId = target.frameId;
-      lastActivate = Date.now();
-      this.host.activateMediaFrame(target.frameId);
       if (frameChanged) {
+        lastFrameId = target.frameId;
+        lastActivate = Date.now();
+        this.host.activateMediaFrame(target.frameId);
         const kind = target.source === "frames" ? "视频" : "任务点";
         const label = target.taskTotal
           ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kind}`
@@ -487,7 +487,9 @@ export class AutoTurnRunner {
 
       if (settings.video.resumeOnPause && state?.anyPaused) {
         if (!pausedSince) pausedSince = Date.now();
-        if (Date.now() - lastActivate > 1500) {
+        // 只在目标切换或暂停恢复重试时发 RESUME；不能每 500ms 都发，
+        // 否则播放器会被连续 play 打断，表现为画面抖动。
+        if (Date.now() - lastActivate > 5000) {
           lastActivate = Date.now();
           this.host.activateMediaFrame(target.frameId);
         }
@@ -516,6 +518,7 @@ export class AutoTurnRunner {
     let pausedSince = 0;
     let endedSince = 0;
     let lastPauseNotice = 0;
+    let lastResumeAttempt = 0;
     while (Date.now() - started < timeoutMs) {
       if (!isAlive()) return "none";
       const state = this.host.getChildMediaState();
@@ -529,7 +532,11 @@ export class AutoTurnRunner {
       }
       if (allowResume && state.anyPaused) {
         if (!pausedSince) pausedSince = Date.now();
-        this.host.resumeChildMedia();
+        // 不要每个轮询周期都 play()：部分播放器被连续 play 会反复暂停/恢复，表现为抖动
+        if (Date.now() - lastResumeAttempt > 3000) {
+          lastResumeAttempt = Date.now();
+          this.host.resumeChildMedia();
+        }
         // 不因暂停直接停止，等待用户手动播放；播放结束后会自动继续翻页
         if (Date.now() - pausedSince > 8000 && Date.now() - lastPauseNotice > 15000) {
           lastPauseNotice = Date.now();

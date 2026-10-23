@@ -121,7 +121,8 @@ export async function waitForMedia(
       return;
     }
     const last = lastAttempt.get(element) ?? 0;
-    if (now - last < 2000) return;
+    // 频繁 play() 会让部分播放器反复暂停/恢复，表现为画面抖动；5 秒一次足够
+    if (now - last < 5000) return;
     lastAttempt.set(element, now);
     focusMedia(element);
     try {
@@ -129,17 +130,8 @@ export async function waitForMedia(
       if (preferences.defaultMuted) element.muted = true;
       await element.play();
     } catch {
-      // 部分播放器需要鼠标聚焦/点击视频区域后才允许播放
-      try {
-        element.click();
-      } catch {
-        /* ignore */
-      }
-      try {
-        await element.play();
-      } catch {
-        /* 由下面的 blocked 判定处理 */
-      }
+      // 不再用 click() 兜底：点击视频会切换播放/暂停，连续重试就是抖动的直接来源。
+      // 播放器需要聚焦时 focusMedia 已经派发过鼠标事件，失败则交给 blocked 提示。
     }
   };
 

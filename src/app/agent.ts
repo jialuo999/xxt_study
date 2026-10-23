@@ -375,12 +375,7 @@ export class FrameAgent {
         try {
           await primary.play();
         } catch {
-          try {
-            primary.click();
-            await primary.play();
-          } catch {
-            /* 浏览器可能拒绝自动播放 */
-          }
+          // 不点击视频兜底：click 会切换播放/暂停，反复重试会造成画面抖动
         }
       }
     } catch {
