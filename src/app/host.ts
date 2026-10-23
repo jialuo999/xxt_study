@@ -25,13 +25,14 @@ import { gmGet, gmSet } from "@/core/gm";
 import {
   createMessage,
   createToken,
-  isFrameMessage,
   isTrustedOrigin,
   sendToWindow,
+  validateFrameMessage,
 } from "@/core/messages";
 import { getAdapter } from "@/platform/registry";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { detectVerificationChallenge } from "@/platform/chaoxing/verification";
+import { resetSubmitGuard } from "@/platform/chaoxing/submit";
 import {
   initBank,
   getBankStats,
@@ -53,58 +54,32 @@ import type {
   UiState,
 } from "@/ui/contract";
 import { AutoTurnRunner } from "./autoturn";
-import type { MediaPlaybackTarget } from "./autoturn";
-import { collectMedia } from "./media-preferences";
+import {
+  chapterIdFromUrl,
+  selectMediaPlaybackTarget,
+  summarizeChildMediaState,
+  taskUrlKey,
+  type MediaPlaybackTarget,
+} from "./media-target";
+import { collectDocumentMedia, collectMedia, pickPrimaryMedia } from "./media-preferences";
+import { startPlaybackGuard as createPlaybackGuard, type PlaybackGuard } from "./playback-guard";
+import {
+  acquireLock,
+  heartbeatLock,
+  lockKeyFromUrl,
+  readLock,
+  releaseLock,
+  TAB_LOCK_HEARTBEAT_MS,
+} from "./tab-lock";
+import { buildDiagnostics, formatDiagnostics } from "./diagnostics";
 
 const NOTICE_KEY = "study-helper.notice.v1";
-
-const TASK_URL_KEYS = [
-  "jobid",
-  "jobId",
-  "knowledgeId",
-  "knowledgeid",
-  "chapterId",
-  "chapterid",
-  "objectId",
-  "objectid",
-  "clazzid",
-  "clazzId",
-  "courseId",
-  "courseid",
-] as const;
-
-/** 去掉 _dc 等缓存参数，只保留能区分任务点的 URL 特征 */
-function taskUrlKey(raw: string): string {
-  try {
-    const url = new URL(raw);
-    const search = TASK_URL_KEYS.filter((key) => url.searchParams.has(key))
-      .map((key) => `${key}=${url.searchParams.get(key)}`)
-      .join("&");
-    return `${url.origin}${url.pathname}${search ? `?${search}` : ""}`;
-  } catch {
-    return raw;
-  }
-}
-
-/** 任务点 iframe 与子 frame URL 的最终兜底：jobid / objectid */
-function taskKeyParam(url: URL): string {
-  try {
-    return (
-      url.searchParams.get("jobid") ??
-      url.searchParams.get("jobId") ??
-      url.searchParams.get("objectid") ??
-      url.searchParams.get("objectId") ??
-      ""
-    );
-  } catch {
-    return "";
-  }
-}
 
 interface ChildFrame {
   frameId: string;
   source: Window;
   token: string;
+  nonce: string;
   url: string;
   title: string;
   pageKind: PageInfo["kind"];
@@ -113,7 +88,7 @@ interface ChildFrame {
 }
 
 interface PendingFill {
-  resolve: (results: FillResult[]) => void;
+  resolve: (results: FillResult[], timedOut?: boolean) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -148,6 +123,16 @@ export class HostController implements UiController {
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshSeq = 0;
   private activeMediaFrameId = "";
+  private filledQuestionIds = new Set<string>();
+  private submitConfirmAt = 0;
+  private hostGuard: PlaybackGuard | null = null;
+  private lastGuardNoticeAt = 0;
+  private tabId = createToken();
+  private tabLockKey = "";
+  private tabLockTimer: ReturnType<typeof setInterval> | null = null;
+  private tabLockHeld = false;
+  private lastTabLockHeartbeat = 0;
+  private disposed = false;
   private disposers: Array<() => void> = [];
 
   constructor() {
@@ -161,6 +146,7 @@ export class HostController implements UiController {
       status: "idle",
       statusText: "初始化…",
       progress: null,
+      filledQuestionIds: [],
       autoTurn: {
         running: false,
         steps: 0,
@@ -168,7 +154,12 @@ export class HostController implements UiController {
         message: "",
         nextAt: null,
       },
-      bank: { total: 0, lastUpdated: null },
+      bank: {
+        total: 0,
+        lastUpdated: null,
+        storage: "indexeddb",
+        indexedDbAvailable: true,
+      },
       settings: getSettings(),
       logs: getLogs(),
       lastSubmit: null,
@@ -188,8 +179,11 @@ export class HostController implements UiController {
       pauseMedia: () => this.pauseMedia(),
       getTaskSignature: () => this.getTaskSignature(),
       hasVerificationChallenge: () => this.state.verification.detected,
+      onStarted: () => this.startPlaybackGuard(),
       onState: (autoTurn) => this.patch({ autoTurn }),
       onStopped: (reason) => {
+        this.stopPlaybackGuard();
+        this.releaseAutoTurnLock();
         this.toast("info", reason);
         this.patch({ statusText: "自动翻页已停止" });
       },
@@ -222,16 +216,39 @@ export class HostController implements UiController {
 
     await this.initBankSafe();
     await this.refresh();
-    if (!this.state.verification.detected && this.isAutoTurnPage()) this.autoTurn.restore();
+    if (
+      !this.state.verification.detected &&
+      this.isAutoTurnPage() &&
+      this.autoTurn.hasRestorableSession()
+    ) {
+      if (this.acquireAutoTurnLock()) {
+        this.autoTurn.restore();
+      } else {
+        logger.warn("autoturn", "多标签互斥：已取消刷新后自动恢复");
+      }
+    }
+    window.addEventListener("pagehide", this.handlePageHide);
 
     this.urlTimer = setInterval(() => {
-      this.checkVerification();
-      if (location.href !== this.lastHref) {
-        this.lastHref = location.href;
-        void this.onNavigation();
+      try {
+        this.checkVerification();
+        if (location.href !== this.lastHref) {
+          this.lastHref = location.href;
+          void this.onNavigation().catch((error: unknown) => {
+            logger.warn("nav", "页面跳转处理失败", error);
+          });
+        }
+      } catch (error) {
+        logger.warn("boot", "定时检查失败", error);
       }
     }, 1200);
-    this.frameSweepTimer = setInterval(() => this.sweepFrames(), 10000);
+    this.frameSweepTimer = setInterval(() => {
+      try {
+        this.sweepFrames();
+      } catch (error) {
+        logger.warn("frame", "frame 清理失败", error);
+      }
+    }, 10000);
 
     this.patch({
       ready: true,
@@ -250,7 +267,15 @@ export class HostController implements UiController {
   async refresh(): Promise<void> {
     if (this.checkVerification()) return;
     const seq = ++this.refreshSeq;
-    this.patch({ status: "scanning", statusText: "扫描题目…" });
+    this.filledQuestionIds.clear();
+    this.submitConfirmAt = 0;
+    // 同一 Document 内重新扫描时允许再次提交（SPA 换题/分页场景）
+    resetSubmitGuard(document);
+    this.patch({
+      status: "scanning",
+      statusText: "扫描题目…",
+      filledQuestionIds: [],
+    });
     this.detectPage();
     this.collectLocal();
     // 通知子 frame 重新采集
@@ -355,6 +380,7 @@ export class HostController implements UiController {
     }
 
     const results: FillResult[] = [];
+    let timedOut = false;
     for (const [frameId, questions] of grouped) {
       if (frameId === "top") {
         if (!this.adapter || !this.context) continue;
@@ -377,7 +403,16 @@ export class HostController implements UiController {
         }
       } else {
         const child = this.children.get(frameId);
-        if (!child) continue;
+        if (!child) {
+          for (const question of questions) {
+            results.push({
+              questionId: question.id,
+              ok: false,
+              message: "子页面连接已断开，请重新扫描",
+            });
+          }
+          continue;
+        }
         const answers = questions
           .map((question) => ({
             questionId: question.id,
@@ -392,19 +427,31 @@ export class HostController implements UiController {
           createMessage({ t: "FILL", token: child.token, answers, delayMs: settings.solving.fillDelayMs }),
         );
         const filled = await this.waitForFill(frameId, 30000);
-        results.push(...filled);
+        results.push(...filled.results);
+        if (filled.timedOut) {
+          timedOut = true;
+          logger.warn("fill", "子页面填入响应超时", { frameId, expected: answers.length });
+        }
       }
     }
 
+    // 只有真正返回 ok 的题目才算“已填入”；超时/失败不能计入覆盖率。
+    for (const result of results) {
+      if (result.ok) this.filledQuestionIds.add(result.questionId);
+    }
+    this.patch({ filledQuestionIds: [...this.filledQuestionIds] });
+
     const ok = results.filter((result) => result.ok).length;
     const failed = results.length - ok;
-    this.patch({
-      status: "idle",
-      statusText: failed ? `填入完成：${ok} 成功，${failed} 失败` : `已填入 ${ok} 题`,
-    });
-    this.toast(failed ? "warn" : "success", failed ? `填入完成：${ok} 成功，${failed} 失败` : `已填入 ${ok} 题`);
-    logger.info("fill", `填入完成：成功 ${ok}，失败 ${failed}`);
-    return failed === 0 && ok > 0;
+    const summary = timedOut
+      ? `填入超时：${ok} 成功，${failed} 失败`
+      : failed
+        ? `填入完成：${ok} 成功，${failed} 失败`
+        : `已填入 ${ok} 题`;
+    this.patch({ status: "idle", statusText: summary });
+    this.toast(failed || timedOut ? (timedOut ? "error" : "warn") : "success", summary);
+    logger.info("fill", `填入完成：成功 ${ok}，失败 ${failed}${timedOut ? "，含超时" : ""}`);
+    return failed === 0 && ok > 0 && !timedOut;
   }
 
   async submit(): Promise<void> {
@@ -413,7 +460,35 @@ export class HostController implements UiController {
       return;
     }
     const settings = getSettings();
+    if (settings.solving.mode === "hint") {
+      this.toast("warn", "当前为「仅提示」模式，不会提交；请切换到复核后提交/全自动");
+      return;
+    }
     const pageKind = this.state.page.kind;
+    const total = this.state.questions.length;
+    const filled = this.state.questions.filter((question) =>
+      this.filledQuestionIds.has(question.id),
+    ).length;
+    if (total === 0) {
+      this.toast("warn", "还没有采集到题目，无法提交");
+      return;
+    }
+    if (filled === 0) {
+      this.toast("warn", "还没有任何答案填入页面，请先解题并「全部填入」");
+      return;
+    }
+    if (filled < total) {
+      // 二次确认：第一次点击只提示，15 秒内再次点击才继续，避免误提交空白/部分答案。
+      const now = Date.now();
+      if (now - this.submitConfirmAt > 15000) {
+        this.submitConfirmAt = now;
+        this.toast("warn", `还有 ${total - filled} 题未填入，确认要提交请再次点击「提交」`);
+        logger.warn("submit", "提交前覆盖不足，等待二次确认", { filled, total });
+        return;
+      }
+    }
+    this.submitConfirmAt = 0;
+
     const unanswered = this.state.questions.filter(
       (question) => !this.state.results[question.id]?.answer,
     );
@@ -453,7 +528,11 @@ export class HostController implements UiController {
     }
     this.patch({ status: "idle", lastSubmit: result, statusText: result.ok ? "提交成功" : "提交状态未知" });
     this.toast(result.ok ? "success" : "warn", result.message);
-    if (result.ok) this.autoTurn.stop("提交完成，自动翻页已停止");
+    if (result.ok) {
+      this.autoTurn.stop("提交完成，自动翻页已停止");
+      this.filledQuestionIds.clear();
+      this.patch({ filledQuestionIds: [] });
+    }
     if (settings.solving.mode === "auto" && !result.ok) {
       logger.warn("submit", "自动提交失败", result);
     }
@@ -475,6 +554,7 @@ export class HostController implements UiController {
       this.toast("warn", "当前页面不支持自动翻页");
       return;
     }
+    if (!this.acquireAutoTurnLock()) return;
     if (!getSettings().autoTurn.enabled) {
       updateSettings({ autoTurn: { enabled: true } });
       this.patch({ settings: getSettings() });
@@ -485,14 +565,24 @@ export class HostController implements UiController {
 
   stopAutoTurn(): void {
     this.autoTurn.stop();
+    this.releaseAutoTurnLock();
   }
 
+  private handlePageHide = (): void => {
+    this.releaseAutoTurnLock();
+    this.dispose();
+  };
+
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.releaseAutoTurnLock();
     if (this.urlTimer) clearInterval(this.urlTimer);
     if (this.frameSweepTimer) clearInterval(this.frameSweepTimer);
     this.urlTimer = null;
     this.frameSweepTimer = null;
     window.removeEventListener("message", this.handleMessage);
+    window.removeEventListener("pagehide", this.handlePageHide);
     for (const dispose of this.disposers.splice(0)) {
       try {
         dispose();
@@ -501,6 +591,7 @@ export class HostController implements UiController {
       }
     }
     this.autoTurn.stop("页面已卸载");
+    this.stopPlaybackGuard();
     if (this.toastTimer) clearTimeout(this.toastTimer);
     for (const pending of this.pendingFills.values()) clearTimeout(pending.timer);
     for (const pending of this.pendingSubmits.values()) clearTimeout(pending.timer);
@@ -598,6 +689,45 @@ export class HostController implements UiController {
     return exportLogText();
   }
 
+  /**
+   * 生成并复制脱敏诊断包（页面结构、选择器命中、媒体/翻页状态、脱敏设置与最近日志）。
+   * 只有用户点击时才生成，不包含答案。
+   */
+  async copyDiagnostics(): Promise<boolean> {
+    try {
+      const report = buildDiagnostics(
+        {
+          page: this.state.page,
+          frames: this.state.frames,
+          questions: this.state.questions,
+          settings: this.state.settings,
+          logs: this.state.logs,
+          media: this.getChildMediaState(),
+          autoTurn: this.state.autoTurn,
+          verification: {
+            detected: this.state.verification.detected,
+            message: this.state.verification.message,
+          },
+          tabLock: this.currentTabLockState(),
+        },
+        document,
+        typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev",
+      );
+      const text = formatDiagnostics(report);
+      const copied = await copyText(text);
+      this.toast(
+        copied ? "success" : "error",
+        copied ? "诊断包已复制到剪贴板" : "复制失败，请从运行日志手动导出",
+      );
+      logger.info("diagnostics", copied ? "诊断包已复制" : "诊断包复制失败");
+      return copied;
+    } catch (error) {
+      logger.error("diagnostics", "生成诊断包失败", error);
+      this.toast("error", "生成诊断包失败");
+      return false;
+    }
+  }
+
   acceptNotice(): void {
     gmSet(NOTICE_KEY, true);
     this.patch({ noticeAccepted: true });
@@ -643,7 +773,12 @@ export class HostController implements UiController {
     try {
       const stats = await getBankStats();
       this.patch({
-        bank: { total: stats.total, lastUpdated: stats.newestUpdatedAt },
+        bank: {
+          total: stats.total,
+          lastUpdated: stats.newestUpdatedAt,
+          storage: stats.storage,
+          indexedDbAvailable: stats.indexedDbAvailable,
+        },
       });
     } catch (error) {
       logger.warn("bank", "读取题库统计失败", error);
@@ -693,7 +828,13 @@ export class HostController implements UiController {
 
   private detectPage(): void {
     const url = new URL(location.href);
-    const adapter = getAdapter(url);
+    let adapter: PlatformAdapter | null = null;
+    try {
+      adapter = getAdapter(url);
+    } catch (error) {
+      logger.warn("platform", "适配器匹配失败", error);
+      adapter = null;
+    }
     this.adapter = adapter;
     if (!adapter) {
       this.context = null;
@@ -770,8 +911,8 @@ export class HostController implements UiController {
   }
 
   private handleMessage = (event: MessageEvent): void => {
-    const message = event.data;
-    if (!isFrameMessage(message)) return;
+    const message = validateFrameMessage(event.data);
+    if (!message) return;
     if (!isTrustedOrigin(event.origin)) return;
     const source = event.source as Window | null;
     if (!source) return;
@@ -783,25 +924,34 @@ export class HostController implements UiController {
         const sameSource = Boolean(existing && existing.source === source);
         const token = sameSource ? existing!.token : createToken();
         if (!sameSource) {
-          // 页面/任务点切换后，旧 frame 的媒体状态已经不可信，先清空等待新上报
-          this.childMedia.clear();
+          // 页面/任务点切换后，旧 frame 的媒体状态已经不可信，只清该来源对应的状态
+          for (const [frameId, child] of this.children) {
+            if (child.source === source && frameId !== message.frameId) {
+              this.children.delete(frameId);
+              this.childMedia.delete(frameId);
+            }
+          }
         }
         this.children.set(message.frameId, {
           frameId: message.frameId,
           source,
           token,
+          nonce: message.nonce,
           url: message.url,
           title: message.title,
           pageKind: message.pageKind,
           questions: sameSource ? existing!.questions : [],
           lastSeen: Date.now(),
         });
-        sendToWindow(source, createMessage({ t: "WELCOME", token }));
+        sendToWindow(source, createMessage({ t: "WELCOME", token, nonce: message.nonce }));
         // 已有正在播放的目标时，新加载的预加载 frame 默认暂停，避免多个视频同时出声
         if (this.activeMediaFrameId && this.activeMediaFrameId !== message.frameId) {
           sendToWindow(source, createMessage({ t: "PAUSE_MEDIA", token }));
         }
         sendToWindow(source, createMessage({ t: "COLLECT", token }));
+        if (this.autoTurn.isRunning) {
+          sendToWindow(source, createMessage({ t: "GUARD_START", token }));
+        }
         logger.debug("frame", `连接子 frame ${message.frameId}（${message.pageKind}）`);
         this.rebuildQuestions();
         break;
@@ -855,6 +1005,17 @@ export class HostController implements UiController {
         this.childMedia.set(message.frameId, { state, at: Date.now() });
         break;
       }
+      case "GUARD_NOTICE": {
+        const child = this.children.get(message.frameId);
+        if (!child || child.token !== message.token) return;
+        child.lastSeen = Date.now();
+        logger.warn("guard", message.message, {
+          frameId: message.frameId,
+          level: message.level,
+        });
+        if (message.level === "warn") this.toast("warn", message.message);
+        break;
+      }
       case "SUBMIT_RESULT": {
         const child = this.children.get(message.frameId);
         if (!child || child.token !== message.token) return;
@@ -871,18 +1032,26 @@ export class HostController implements UiController {
     }
   };
 
-  private waitForFill(frameId: string, timeoutMs: number): Promise<FillResult[]> {
+  private waitForFill(
+    frameId: string,
+    timeoutMs: number,
+  ): Promise<{ results: FillResult[]; timedOut: boolean }> {
     return new Promise((resolve) => {
       const existing = this.pendingFills.get(frameId);
       if (existing) {
         clearTimeout(existing.timer);
-        existing.resolve([]);
+        this.pendingFills.delete(frameId);
+        existing.resolve([], true);
       }
       const timer = setTimeout(() => {
+        if (!this.pendingFills.has(frameId)) return;
         this.pendingFills.delete(frameId);
-        resolve([]);
+        resolve({ results: [], timedOut: true });
       }, timeoutMs);
-      this.pendingFills.set(frameId, { resolve, timer });
+      this.pendingFills.set(frameId, {
+        resolve: (results, timedOut = false) => resolve({ results, timedOut }),
+        timer,
+      });
     });
   }
 
@@ -935,108 +1104,30 @@ export class HostController implements UiController {
   }
 
   private currentChapterId(): string {
-    try {
-      return new URL(location.href).searchParams.get("chapterId") ?? "";
-    } catch {
-      return "";
-    }
+    return chapterIdFromUrl(location.href);
+  }
+
+  private liveChildren(): ChildFrame[] {
+    return [...this.children.values()].filter((child) => {
+      try {
+        return !child.source.closed;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**
    * 学习通同页多任务点时，按任务点 DOM 顺序选出当前应播放的子 frame。
    *
-   * 内容 frame 的 agent 会上报第一个“未完成且带 iframe”的任务点 URL；
-   * 这里把该 URL 与已连接子 frame 的 URL 匹配，自动翻页只激活这一个 frame，
-   * 其他 frame 暂停，避免多个视频同时播放/互相抢进度。
+   * 具体的选择/章节过滤逻辑在 `media-target.ts` 的纯函数中，便于单测。
    */
   getMediaPlaybackTarget(): MediaPlaybackTarget | null {
-    const entries = [...this.childMedia.entries()].filter(
-      ([, item]) => Date.now() - item.at < 3500,
-    );
-    const taskEntry = entries
-      .filter(
-        ([, item]) =>
-          item.state.taskTotal !== undefined ||
-          item.state.nextTaskUrl !== undefined ||
-          item.state.allTasksFinished !== undefined,
-      )
-      .sort((a, b) => b[1].at - a[1].at)[0];
-
-    if (taskEntry) {
-      const state = taskEntry[1].state;
-      if (state.allTasksFinished) {
-        return {
-          frameId: null,
-          taskUrl: "",
-          taskIndex: -1,
-          taskTotal: state.taskTotal ?? 0,
-          state: null,
-          allTasksFinished: true,
-          source: "tasks",
-        };
-      }
-      const taskUrl = state.nextTaskUrl;
-      if (taskUrl) {
-        const child = this.findChildForTask(taskUrl);
-        if (child) {
-          return {
-            frameId: child.frameId,
-            taskUrl,
-            taskIndex: state.nextTaskIndex ?? 0,
-            taskTotal: state.taskTotal ?? 0,
-            state: this.childMedia.get(child.frameId)?.state ?? null,
-            allTasksFinished: false,
-            source: "tasks",
-          };
-        }
-      }
-    }
-
-    // 任务点标记缺失/iframe 未匹配时，回退为“按子 frame 连接顺序逐个播放”，
-    // 保证同页多个播放器不会同时被恢复。
-    return this.fallbackMediaTarget();
-  }
-
-  /** 任务点信息不足时，按子 frame 顺序逐个激活，避免所有视频一起播放 */
-  private fallbackMediaTarget(): MediaPlaybackTarget | null {
-    const frames = [...this.children.values()]
-      .filter((child) => {
-        const entry = this.childMedia.get(child.frameId);
-        if (!entry || Date.now() - entry.at >= 3500) return false;
-        if (!entry.state.hasMedia) return false;
-        try {
-          return !child.source.closed;
-        } catch {
-          return false;
-        }
-      })
-      .map((child) => ({ child, state: this.childMedia.get(child.frameId)!.state }));
-    if (frames.length === 0) return null;
-
-    const pending = frames.filter(
-      ({ state }) => !state.allEnded && !state.currentTaskFinished,
-    );
-    if (pending.length === 0) {
-      return {
-        frameId: null,
-        taskUrl: "",
-        taskIndex: -1,
-        taskTotal: frames.length,
-        state: null,
-        allTasksFinished: true,
-        source: "frames",
-      };
-    }
-    const first = pending[0];
-    return {
-      frameId: first.child.frameId,
-      taskUrl: first.child.url,
-      taskIndex: frames.indexOf(first),
-      taskTotal: frames.length,
-      state: first.state,
-      allTasksFinished: false,
-      source: "frames",
-    };
+    return selectMediaPlaybackTarget({
+      children: this.liveChildren(),
+      childMedia: this.childMedia,
+      chapterId: this.currentChapterId(),
+    });
   }
 
   /**
@@ -1065,83 +1156,13 @@ export class HostController implements UiController {
     sendToWindow(target.source, createMessage({ t: "RESUME_MEDIA", token: target.token }));
   }
 
-  private findChildForTask(taskUrl: string): ChildFrame | null {
-    // 优先最近活跃的 frame，避免任务点切换后匹配到尚未被 sweep 清理的旧 frame
-    const children = [...this.children.values()]
-      .filter((child) => {
-        try {
-          return !child.source.closed;
-        } catch {
-          return false;
-        }
-      })
-      .sort((a, b) => b.lastSeen - a.lastSeen);
-    const targetKey = taskUrlKey(taskUrl);
-    for (const child of children) {
-      if (taskUrlKey(child.url) === targetKey) return child;
-    }
-    // 部分播放器 URL 会追加随机参数，退化为按 jobid / objectid 匹配
-    try {
-      const target = new URL(taskUrl);
-      const targetJob = taskKeyParam(target);
-      if (targetJob) {
-        for (const child of children) {
-          try {
-            if (taskKeyParam(new URL(child.url)) === targetJob) return child;
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
-
-  /** 汇总子 frame 的媒体状态，供自动翻页判断视频/音频是否结束 */
+  /** 汇总子 frame 的媒体状态（只统计当前章节的 frame），供自动翻页判断媒体是否结束 */
   getChildMediaState(): MediaState | null {
-    // 只信任最近上报；frame 卸载/切换后旧状态最多保留 3.5 秒，避免把上一页的“已完成”带过来
-    const entries = [...this.childMedia.entries()].filter(
-      ([, item]) => Date.now() - item.at < 3500,
-    );
-    if (entries.length === 0) return null;
-    const media = entries.map(([, item]) => item).filter((item) => item.state.hasMedia);
-
-    // 任务点完成状态只取“当前章节”的内容 frame；只有整章任务点都完成才跳过，
-    // 避免章节里还有未完成视频时被单个知识卡片的完成状态带过去
-    const chapterId = this.currentChapterId();
-    let allTasksFinished = false;
-    for (const [frameId, item] of entries) {
-      if (!chapterId) {
-        if (item.state.allTasksFinished) allTasksFinished = true;
-        continue;
-      }
-      const child = this.children.get(frameId);
-      if (!child) continue;
-      let matchesChapter = false;
-      try {
-        const url = new URL(child.url);
-        const knowledgeId =
-          url.searchParams.get("knowledgeid") ?? url.searchParams.get("knowledgeId") ?? "";
-        matchesChapter =
-          knowledgeId === chapterId || url.searchParams.get("chapterId") === chapterId;
-      } catch {
-        /* ignore */
-      }
-      if (!matchesChapter) continue;
-      if (item.state.allTasksFinished) allTasksFinished = true;
-    }
-    const finished = allTasksFinished;
-
-    if (media.length === 0 && !finished) return null;
-    return {
-      hasMedia: media.length > 0,
-      allEnded: media.length > 0 && media.every((item) => item.state.allEnded),
-      anyPaused: media.some((item) => item.state.anyPaused),
-      currentTaskFinished: finished,
-      allTasksFinished,
-    };
+    return summarizeChildMediaState({
+      children: this.liveChildren(),
+      childMedia: this.childMedia,
+      chapterId: this.currentChapterId(),
+    });
   }
 
   /**
@@ -1164,8 +1185,105 @@ export class HostController implements UiController {
     return `${taskUrlKey(location.href)}|${this.state.page.kind}|${current}|${frames}`;
   }
 
+  /**
+   * 抢多标签锁：同一门课程只允许一个标签页自动翻页。
+   * 冲突时只拒绝启动，不停止对方；锁心跳过期后可自动接管。
+   */
+  private acquireAutoTurnLock(): boolean {
+    const key = lockKeyFromUrl(location.href);
+    const label = `${document.title || "学习通"} · ${location.pathname}`;
+    const result = acquireLock(key, this.tabId, label, Date.now());
+    if (!result.ok) {
+      const holder = result.holder;
+      const detail = holder.label ? `（${holder.label}）` : "";
+      this.toast("warn", `另一个标签页正在自动翻页${detail}，请先停止它`);
+      logger.warn("autoturn", "多标签互斥：另一个标签页正在运行", {
+        holderTab: holder.tabId,
+        holderLabel: holder.label,
+        heartbeatAt: holder.heartbeatAt,
+      });
+      return false;
+    }
+    this.tabLockKey = key;
+    this.tabLockHeld = true;
+    this.lastTabLockHeartbeat = Date.now();
+    if (this.tabLockTimer) clearInterval(this.tabLockTimer);
+    this.tabLockTimer = setInterval(() => {
+      if (!this.tabLockHeld || !this.tabLockKey) return;
+      const now = Date.now();
+      if (heartbeatLock(this.tabLockKey, this.tabId, now)) {
+        this.lastTabLockHeartbeat = now;
+        return;
+      }
+      this.tabLockHeld = false;
+      this.stopTabLockTimer();
+      this.autoTurn.stop("自动翻页已被另一个标签页接管");
+    }, TAB_LOCK_HEARTBEAT_MS);
+    return true;
+  }
+
+  private stopTabLockTimer(): void {
+    if (this.tabLockTimer) clearInterval(this.tabLockTimer);
+    this.tabLockTimer = null;
+  }
+
+  private releaseAutoTurnLock(): void {
+    this.stopTabLockTimer();
+    if (this.tabLockHeld && this.tabLockKey) {
+      releaseLock(this.tabLockKey, this.tabId);
+    }
+    this.tabLockHeld = false;
+    this.lastTabLockHeartbeat = 0;
+  }
+
+  private currentTabLockState(): { holder: boolean; heartbeatAt: number | null } {
+    if (this.tabLockHeld) {
+      return { holder: true, heartbeatAt: this.lastTabLockHeartbeat || null };
+    }
+    const external = this.tabLockKey ? readLock(this.tabLockKey) : null;
+    return { holder: false, heartbeatAt: external?.heartbeatAt ?? null };
+  }
+
+  /** 自动翻页开始时启动顶层播放守卫，并通知已连接子 frame 启动各自守卫 */
+  private startPlaybackGuard(): void {
+    if (!this.hostGuard) {
+      this.hostGuard = createPlaybackGuard({
+        doc: document,
+        isEnabled: () => getSettings().video.resumeOnPause,
+        // 只保活“主播放器”，避免把同文档里的隐藏广告/背景音也恢复。
+        collectMedia: () => {
+          const primary = pickPrimaryMedia(collectDocumentMedia(document));
+          return primary ? [primary] : [];
+        },
+        onNotice: (message, level) => this.onGuardNotice(message, level),
+      });
+    }
+    for (const child of this.children.values()) {
+      sendToWindow(child.source, createMessage({ t: "GUARD_START", token: child.token }));
+    }
+  }
+
+  private stopPlaybackGuard(): void {
+    this.hostGuard?.stop();
+    this.hostGuard = null;
+    for (const child of this.children.values()) {
+      sendToWindow(child.source, createMessage({ t: "GUARD_STOP", token: child.token }));
+    }
+  }
+
+  private onGuardNotice(message: string, level: "info" | "warn"): void {
+    logger[level === "warn" ? "warn" : "info"]("guard", message);
+    if (level !== "warn") return;
+    // 同一类提示 15 秒内只弹一次，避免播放器反复暂停时刷屏。
+    if (Date.now() - this.lastGuardNoticeAt < 15000) return;
+    this.lastGuardNoticeAt = Date.now();
+    this.toast("warn", message);
+  }
+
   /** 停止自动翻页时暂停所有视频/音频 */
   pauseMedia(): void {
+    // 先挂起守卫，避免它把脚本刚暂停的视频又恢复。
+    this.hostGuard?.suspend();
     this.activeMediaFrameId = "";
     for (const media of collectMedia(document)) {
       try {
@@ -1192,6 +1310,10 @@ export class HostController implements UiController {
     logger.info("nav", `页面跳转：${location.pathname}`);
     this.detectPage();
     this.localQuestions = [];
+    this.filledQuestionIds.clear();
+    this.submitConfirmAt = 0;
+    resetSubmitGuard(document);
+    this.patch({ filledQuestionIds: [] });
     this.rebuildQuestions();
     await this.refresh();
     if (!this.isAutoTurnPage()) {
@@ -1211,7 +1333,7 @@ export class HostController implements UiController {
       } catch {
         closed = false;
       }
-      if (closed || Date.now() - child.lastSeen > 60_000) {
+      if (closed || Date.now() - child.lastSeen > 15_000) {
         this.children.delete(frameId);
         this.childMedia.delete(frameId);
         if (this.activeMediaFrameId === frameId) this.activeMediaFrameId = "";
@@ -1248,5 +1370,32 @@ export class HostController implements UiController {
         logger.warn("ui", "状态订阅者出错", error);
       }
     }
+  }
+}
+
+/** 复制文本：优先 Clipboard API，失败时回退到临时 textarea（需要用户点击手势） */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 回退到 execCommand */
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "true");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    return copied;
+  } catch {
+    return false;
   }
 }

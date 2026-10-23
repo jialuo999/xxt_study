@@ -10,7 +10,12 @@ import { clamp } from "@/utils/async";
 const MIN_RATE = 0.25;
 const MAX_RATE = 4;
 
-function collectShadowMedia(root: ParentNode, out: HTMLMediaElement[], depth = 0): void {
+function collectShadowMedia(
+  root: ParentNode,
+  out: HTMLMediaElement[],
+  seen: Set<HTMLMediaElement>,
+  depth = 0,
+): void {
   if (depth > 3) return;
   try {
     const all = root.querySelectorAll<HTMLElement>("*");
@@ -18,22 +23,35 @@ function collectShadowMedia(root: ParentNode, out: HTMLMediaElement[], depth = 0
     for (let index = 0; index < limit; index++) {
       const shadow = all[index]?.shadowRoot;
       if (!shadow) continue;
-      out.push(...Array.from(shadow.querySelectorAll<HTMLMediaElement>("video, audio")));
-      collectShadowMedia(shadow, out, depth + 1);
+      for (const element of Array.from(shadow.querySelectorAll<HTMLMediaElement>("video, audio"))) {
+        if (seen.has(element)) continue;
+        seen.add(element);
+        out.push(element);
+      }
+      collectShadowMedia(shadow, out, seen, depth + 1);
     }
   } catch {
     /* ignore */
   }
 }
 
-function collectDocumentMedia(doc: Document = document): HTMLMediaElement[] {
+/**
+ * 收集当前文档的媒体：light DOM + 所有 open Shadow Root。
+ *
+ * 旧实现只在“顶层一个媒体都没有”时才进入 Shadow DOM，页面上同时存在普通
+ * video（广告/背景）与 Shadow 播放器时，后者永远不会被静音/倍速/等待。
+ * 这里改为始终合并，并用 Set 去重避免同一元素被重复处理。
+ */
+export function collectDocumentMedia(doc: Document = document): HTMLMediaElement[] {
   const media: HTMLMediaElement[] = [];
+  const seen = new Set<HTMLMediaElement>();
   try {
-    media.push(...Array.from(doc.querySelectorAll<HTMLMediaElement>("video, audio")));
-    if (media.length === 0) {
-      // 新版播放器可能把 video 放进 Shadow DOM
-      collectShadowMedia(doc, media);
+    for (const element of Array.from(doc.querySelectorAll<HTMLMediaElement>("video, audio"))) {
+      if (seen.has(element)) continue;
+      seen.add(element);
+      media.push(element);
     }
+    collectShadowMedia(doc, media, seen);
   } catch {
     /* ignore */
   }
@@ -148,6 +166,20 @@ export function applyMediaPreferences(
   return media.length;
 }
 
+function nodeContainsMedia(node: Node): boolean {
+  try {
+    if (node instanceof HTMLMediaElement) return true;
+    if (!(node instanceof Element)) return false;
+    const tag = node.tagName.toLowerCase();
+    if (tag === "video" || tag === "audio") return true;
+    if (node.querySelector("video, audio")) return true;
+    const shadow = node.shadowRoot;
+    return Boolean(shadow && shadow.querySelector("video, audio"));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 监听媒体创建并应用静音/倍速。
  *
@@ -163,6 +195,7 @@ export function startMediaPreferences(): () => void {
   const lastAppliedMuted = new WeakMap<HTMLMediaElement, boolean>();
   let lastVideo = { ...getSettings().video };
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let sawMedia = false;
 
   const muteOnce = (media: HTMLMediaElement, defaultMuted: boolean): void => {
     if (!defaultMuted || mutedByUser.has(media) || media.muted) return;
@@ -189,13 +222,17 @@ export function startMediaPreferences(): () => void {
 
   const applyAll = (): void => {
     const settings = getSettings().video;
-    for (const media of collectDocumentMedia()) applyToMedia(media, settings);
+    const media = collectDocumentMedia();
+    if (media.length > 0) sawMedia = true;
+    for (const element of media) applyToMedia(element, settings);
   };
 
   const applyNew = (): void => {
     const settings = getSettings().video;
     for (const media of collectDocumentMedia()) {
-      if (!initialized.has(media)) applyToMedia(media, settings);
+      if (initialized.has(media)) continue;
+      sawMedia = true;
+      applyToMedia(media, settings);
     }
   };
 
@@ -209,7 +246,21 @@ export function startMediaPreferences(): () => void {
 
   applyAll();
 
-  const observer = new MutationObserver(() => schedule(applyNew));
+  const observer = new MutationObserver((records) => {
+    // 只关心“新增了媒体（或其容器/Shadow 宿主）”的 DOM 变化。
+    // 章节页/作业页的高频文本更新不再触发全文档 + Shadow 扫描。
+    let relevant = false;
+    for (const record of records) {
+      for (const node of Array.from(record.addedNodes)) {
+        if (nodeContainsMedia(node)) {
+          relevant = true;
+          break;
+        }
+      }
+      if (relevant) break;
+    }
+    if (relevant) schedule(applyNew);
+  });
   try {
     observer.observe(document.documentElement, { childList: true, subtree: true });
   } catch {
@@ -267,12 +318,21 @@ export function startMediaPreferences(): () => void {
   document.addEventListener("timeupdate", onTimeUpdate, true);
   document.addEventListener("ratechange", onRateChange, true);
 
-  // 定时同步跨 frame 设置；非 1x 时补回被播放器重置的倍速
+  // 定时同步跨 frame 设置；非 1x 时补回被播放器重置的倍速。
+  // 没有媒体且为 1x 时降到每 4 个周期（约 6s）探测一次，避免无媒体页面的常驻扫描。
+  let syncTick = 0;
   const syncTimer = setInterval(() => {
     refreshSettings();
     const rate = getSettings().video.playbackRate;
-    if (Math.abs(rate - 1) < 0.001) return;
-    for (const media of collectDocumentMedia()) applyRate(media, rate);
+    const nonDefaultRate = Math.abs(rate - 1) >= 0.001;
+    if (!sawMedia && !nonDefaultRate) {
+      syncTick += 1;
+      if (syncTick % 4 !== 0) return;
+    }
+    const media = collectDocumentMedia();
+    if (media.length > 0) sawMedia = true;
+    if (!nonDefaultRate) return;
+    for (const element of media) applyRate(element, rate);
   }, 1500);
 
   // GM 存储支持时立即收到其他 frame 的设置变更；轮询作为不支持时的兜底

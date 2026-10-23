@@ -56,7 +56,7 @@ describe("submitAnswers", () => {
     expect(result.score).toBe("90");
   });
 
-  it("点击后检测到 URL 变化", async () => {
+  it("点击后跳转到结果页时判成功", async () => {
     const ctx = makeContext(submitHtml, HOMEWORK_URL);
     listenClick((event) => {
       event.preventDefault();
@@ -66,7 +66,58 @@ describe("submitAnswers", () => {
     const result = await chaoxingAdapter.submit!(ctx, {});
     expect(result.ok).toBe(true);
     expect(result.message).toContain("跳转");
+    expect(result.message).toContain("结果页");
     expect(result.url).toContain("/mooc-ans/work/result");
+  });
+
+  it("跳转到登录页时不判成功", async () => {
+    const ctx = makeContext(submitHtml, HOMEWORK_URL);
+    listenClick((event) => {
+      event.preventDefault();
+      window.history.pushState({}, "", "/passport/login?refer=work");
+    });
+
+    const result = await chaoxingAdapter.submit!(ctx, {});
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("请人工确认");
+    expect(result.url).toContain("/passport/login");
+  });
+
+  it("URL 变化但未命中结果页特征时超时判未知", async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = makeContext(submitHtml, HOMEWORK_URL);
+      listenClick((event) => {
+        event.preventDefault();
+        window.history.pushState({}, "", "/mooc-ans/work/doHomeWorkNew?step=2");
+      });
+
+      const pending = chaoxingAdapter.submit!(ctx, {});
+      await vi.advanceTimersByTimeAsync(16_000);
+      const result = await pending;
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("页面已跳转");
+      expect(result.message).toContain("请人工确认");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("15 秒内无任何变化时保持原有超时语义", async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = makeContext(submitHtml, HOMEWORK_URL);
+      listenClick((event) => event.preventDefault());
+
+      const pending = chaoxingAdapter.submit!(ctx, {});
+      await vi.advanceTimersByTimeAsync(16_000);
+      const result = await pending;
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("15 秒");
+      expect(result.message).toContain("请人工确认");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("autoConfirm 只在点击期间返回 true 并恢复 confirm", async () => {

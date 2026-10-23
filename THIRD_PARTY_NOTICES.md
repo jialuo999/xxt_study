@@ -97,6 +97,19 @@ SOFTWARE.
 - Z-Fovik-RT/chaoxing-ai — https://github.com/Z-Fovik-RT/chaoxing-ai
 - WN14755303413/xuexiaoyi-to-xuexitong-tampermonkey-proxy — https://github.com/WN14755303413/xuexiaoyi-to-xuexitong-tampermonkey-proxy
 - Minnjee/course-helper — https://github.com/Minnjee/course-helper（参考了倍速播放的两个通用思路：定时重新断言 playbackRate、在直接查找不到时穿透 Shadow DOM 查 video；本项目为独立实现，未复制代码）
+- BlairCode/NoStopVideo — https://github.com/BlairCode/NoStopVideo（「防止视频因鼠标移出窗口而暂停」的产品思路；本项目播放保活为独立实现，未复制代码，许可状态未核实，仅作灵感记录）
+
+## 2026-10 稳定性优化参考（仅借鉴思路，未复制代码）
+
+本轮「播放保活 / 多标签互斥 / 诊断导出」优化阅读了以下 MIT 项目的实现思路，但代码均为本项目独立实现；如后续直接复用其中代码，需在此补充对应 MIT 许可全文与版权行：
+
+- ocsjs/ocsjs（MIT）— https://github.com/ocsjs/ocsjs：`media.addEventListener("pause", play)` 的事件驱动保活思路、同源 iframe 递归查找媒体、配置迁移与诊断字段设计。
+- zhu-hailin/chaoxing-ai-assistant（MIT）— https://github.com/zhu-hailin/chaoxing-ai-assistant：脚本暂停/人工暂停记账、恢复后进度连续性校验、子 frame URL 变化重新握手的产品思路。
+- Khihl-lucky/ChaoXing-AutoAnswer（MIT）— https://github.com/Khihl-lucky/ChaoXing-AutoAnswer：多标签互斥锁（按任务链分键、心跳、过期接管）的产品思路。
+
+## 已知许可风险
+
+- `src/platform/chaoxing/font/table.json` 的字形映射数据来源 `https://www.forestpolice.org/ttf/2.0/table.json` **未声明许可**。本项目目前仅将其作为字体反爬解码用的数据表内置；若用于再分发，请先确认数据来源许可，或替换为自行生成的字形表。
 
 ## 依赖
 

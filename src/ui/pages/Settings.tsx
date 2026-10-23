@@ -197,6 +197,19 @@ export function SettingsPage({ controller, state }: PageProps) {
         action={errorCount ? <Badge tone="danger">{errorCount} 错误</Badge> : undefined}
       >
         <LogsPanel controller={controller} state={state} />
+        <div class="sh-actions" style="margin-top:8px">
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="copy"
+            onClick={() => void controller.copyDiagnostics()}
+          >
+            复制诊断包
+          </Button>
+          <span class="sh-small sh-faint">
+            页面结构 + 选择器命中 + 脱敏设置与日志，不含答案
+          </span>
+        </div>
       </CollapsibleCard>
 
       <Modal

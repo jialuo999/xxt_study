@@ -4,6 +4,7 @@ import { replaceSettings } from "../../src/core/settings-store";
 import {
   clearBank,
   clearCache,
+  detectBankFormat,
   exportBank,
   getBankStats,
   getCachedSolve,
@@ -169,6 +170,19 @@ describe("parseBankText", () => {
     expect(parsed.rows).toHaveLength(1);
     expect(parsed.skipped).toBe(2);
     expect(parsed.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe("detectBankFormat", () => {
+  it("按扩展名推断格式，.jsonl 不再被当作 json", () => {
+    expect(detectBankFormat("bank.json")).toBe("json");
+    expect(detectBankFormat("BANK.JSON")).toBe("json");
+    expect(detectBankFormat("bank.jsonl")).toBe("txt");
+    expect(detectBankFormat("bank.csv")).toBe("csv");
+    expect(detectBankFormat("bank.tsv")).toBe("tsv");
+    expect(detectBankFormat("bank.tab")).toBe("tsv");
+    expect(detectBankFormat("bank.txt")).toBe("txt");
+    expect(detectBankFormat("noext")).toBe("txt");
   });
 });
 

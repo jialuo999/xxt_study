@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Question } from "../../src/core/types";
+import { DEFAULT_SETTINGS } from "../../src/core/settings";
+import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 
 const fixture = vi.hoisted(() => {
   const question: Question = {
@@ -85,6 +87,14 @@ describe("HostController 集成", () => {
   beforeEach(() => {
     document.body.innerHTML = `<div class="TiMu"><div>1 + 1 = ?</div></div>`;
     localStorage.clear();
+    sessionStorage.clear();
+    replaceSettings(structuredClone(DEFAULT_SETTINGS));
+    (fixture.adapter as { detectPage: () => unknown }).detectPage = () => ({
+      kind: "homework" as const,
+      url: location.href,
+      title: document.title,
+      supported: true,
+    });
     fixture.calls.fill = 0;
     fixture.calls.submit = 0;
   });
@@ -134,6 +144,53 @@ describe("HostController 集成", () => {
     expect(fixture.calls.fill).toBe(0);
     expect(controller.state.results.q1).toBeUndefined();
 
+    controller.dispose();
+  });
+
+  it("仅提示模式不填入也不提交", async () => {
+    updateSettings({ solving: { mode: "hint" } });
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    await controller.init();
+
+    await controller.solve();
+    expect(controller.state.results.q1?.status).toBe("solved");
+
+    expect(await controller.fillAll()).toBe(false);
+    await controller.submit();
+
+    expect(fixture.calls.fill).toBe(0);
+    expect(fixture.calls.submit).toBe(0);
+    controller.dispose();
+  });
+
+  it("没有先填入时拒绝提交，填入后才允许提交", async () => {
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    await controller.init();
+
+    await controller.solve();
+    await controller.submit();
+    expect(fixture.calls.submit).toBe(0);
+
+    expect(await controller.fillAll()).toBe(true);
+    expect(controller.state.filledQuestionIds).toEqual(["q1"]);
+
+    await controller.submit();
+    expect(fixture.calls.submit).toBe(1);
+    controller.dispose();
+  });
+
+  it("扫描后清空已填入状态", async () => {
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    await controller.init();
+    await controller.solve();
+    await controller.fillAll();
+    expect(controller.state.filledQuestionIds.length).toBe(1);
+
+    await controller.refresh();
+    expect(controller.state.filledQuestionIds).toEqual([]);
     controller.dispose();
   });
 });

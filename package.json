@@ -1,7 +1,7 @@
 {
   "name": "study-helper",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "学习通自动翻页、题库与 AI 答题助手（Tampermonkey 用户脚本）",
   "scripts": {

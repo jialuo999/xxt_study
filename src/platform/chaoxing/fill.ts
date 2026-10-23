@@ -12,6 +12,7 @@
  */
 import type { AnswerValue, FillResult, Question } from "../../core/types";
 import type { FillOptions, PageContext } from "../types";
+import { logger } from "../../core/logger";
 import { jitter, sleep } from "../../utils/async";
 import { clickElement, clickInputLabel, setNativeValue, textOf } from "../../utils/dom";
 import { formatAnswer, splitFillValues, textSimilarity } from "../../utils/text";
@@ -291,36 +292,56 @@ async function applyFill(
   const questionId = entry.question.id;
   const blanks = findBlankInputs(entry.element);
   const expected = values.join(" | ");
+  // 答案与页面空位数量不一致时一律判失败：少填会静默失分，多出的答案会被丢弃
+  const countMismatch = values.length !== blanks.length;
+  if (values.length > blanks.length) {
+    logger.warn(
+      "fill",
+      `填空题答案多于页面空数：答案 ${values.length} 空 / 页面 ${blanks.length} 空，多余答案被忽略`,
+      { questionId },
+    );
+  }
+
   if (dryRun) {
     return {
       questionId,
-      ok: blanks.length > 0 && values.length > 0,
+      ok: blanks.length > 0 && values.length > 0 && !countMismatch,
       expected,
       actual: "",
       message:
-        blanks.length > 0
-          ? `dryRun：计划填写 ${Math.min(values.length, blanks.length)} 个空`
-          : "dryRun：未找到填空输入框",
+        blanks.length === 0
+          ? "dryRun：未找到填空输入框"
+          : countMismatch
+            ? `dryRun：答案 ${values.length} 空 / 页面 ${blanks.length} 空，数量不一致`
+            : `dryRun：计划填写 ${values.length} 个空`,
     };
   }
   if (blanks.length === 0) {
     return { questionId, ok: false, expected, message: "未找到填空输入框" };
   }
 
+  // 即使数量不一致也尽量写入能对应的空，便于用户手动补填；但结果仍判为失败
   const limit = Math.min(values.length, blanks.length);
   for (let index = 0; index < limit; index += 1) {
     setNativeValue(blanks[index], values[index] ?? "");
     await pause(delay);
   }
 
-  const actualValues = blanks.slice(0, limit).map((blank) => blank.value);
-  const ok = actualValues.every((item, index) => item.trim() === (values[index] ?? "").trim());
+  // 回读全部空位（含未填项），避免残留旧值被当成已填写
+  const actualValues = blanks.map((blank) => blank.value);
+  const readbackOk =
+    actualValues.length === values.length &&
+    actualValues.every((item, index) => item.trim() === (values[index] ?? "").trim());
   return {
     questionId,
-    ok,
+    ok: !countMismatch && readbackOk,
     expected,
     actual: actualValues.join(" | "),
-    message: ok ? `已填写 ${limit} 个空` : "填空回读不一致",
+    message: countMismatch
+      ? `填空数量不一致：答案 ${values.length} 空 / 页面 ${blanks.length} 空`
+      : readbackOk
+        ? `已填写 ${blanks.length} 个空`
+        : "填空回读不一致",
   };
 }
 

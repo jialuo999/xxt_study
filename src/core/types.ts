@@ -63,6 +63,8 @@ export interface MediaState {
   hasMedia: boolean;
   allEnded: boolean;
   anyPaused: boolean;
+  /** 上报时所在 frame 的章节 id 快照（用于过滤上一章节的残留状态） */
+  chapterId?: string;
   /** 当前任务点是否已完成（学习通 .ans-job-finished） */
   currentTaskFinished?: boolean;
   /** 当前页所有任务点是否都已完成 */

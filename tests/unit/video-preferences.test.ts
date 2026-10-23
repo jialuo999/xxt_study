@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyMediaPreferences,
+  collectDocumentMedia,
   collectMedia,
   focusMedia,
   pickPrimaryMedia,
@@ -82,6 +83,21 @@ describe("media-preferences", () => {
     });
     expect(count).toBe(1);
     expect(video.playbackRate).toBe(2);
+  });
+
+  it("Shadow DOM 播放器与普通 video 同时存在时都能被发现", () => {
+    const light = document.createElement("video");
+    document.body.appendChild(light);
+
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    const shadowVideo = document.createElement("video");
+    shadow.appendChild(shadowVideo);
+    document.body.appendChild(host);
+
+    const media = collectDocumentMedia(document);
+    expect(media).toContain(light);
+    expect(media).toContain(shadowVideo);
   });
 
   it("媒体偏好只处理当前文档，同源 iframe 交给子 frame 自己的实例", () => {

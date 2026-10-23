@@ -36,6 +36,9 @@ export interface AutoTurnView {
 export interface BankStatsView {
   total: number;
   lastUpdated: number | null;
+  /** 当前题库存储后端；memory 表示 IndexedDB 不可用，刷新会丢失 */
+  storage: "indexeddb" | "memory";
+  indexedDbAvailable: boolean;
 }
 
 export interface ImportResultView {
@@ -74,6 +77,8 @@ export interface UiState {
   status: HostStatus;
   statusText: string;
   progress: { done: number; total: number } | null;
+  /** 已成功填入页面的题目 id（提交前覆盖率校验用） */
+  filledQuestionIds: string[];
   autoTurn: AutoTurnView;
   bank: BankStatsView;
   settings: Settings;
@@ -91,6 +96,8 @@ export interface UiController {
   solve(): Promise<void>;
   fillAll(questionIds?: string[]): Promise<boolean>;
   submit(): Promise<void>;
+  /** 生成并复制脱敏诊断包；成功返回 true */
+  copyDiagnostics(): Promise<boolean>;
   startAutoTurn(): void;
   stopAutoTurn(): void;
   importBankFile(file: File): Promise<ImportResultView>;

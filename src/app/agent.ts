@@ -1,8 +1,10 @@
 import type { PageInfo, Question } from "@/core/types";
 import {
   createMessage,
-  isFrameMessage,
+  createToken,
+  isTrustedOrigin,
   sendToWindow,
+  validateFrameMessage,
   type FrameMessage,
 } from "@/core/messages";
 import { getSettings } from "@/core/settings-store";
@@ -12,7 +14,15 @@ import { primeFontDecoder } from "@/platform/chaoxing/font/decoder";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { frameId as getFrameId } from "./frames";
 import { collectTaskPointState } from "./task-points";
-import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
+import {
+  collectDocumentMedia,
+  collectMedia,
+  focusMedia,
+  pickPrimaryMedia,
+} from "./media-preferences";
+import { chapterIdFromUrl } from "./media-target";
+import { startPlaybackGuard, type PlaybackGuard } from "./playback-guard";
+import { resetSubmitGuard } from "@/platform/chaoxing/submit";
 
 const UNKNOWN: PageInfo = {
   kind: "unknown",
@@ -29,6 +39,9 @@ export class FrameAgent {
   private adapter: PlatformAdapter | null = null;
   private context: PageContext | null = null;
   private token = "";
+  private nonce = createToken();
+  private lastUrl = location.href;
+  private urlTimer: ReturnType<typeof setInterval> | null = null;
   private questions: Question[] = [];
   private lastSignature = "";
   private frameId = getFrameId();
@@ -40,6 +53,7 @@ export class FrameAgent {
   private mediaTimeListener: (() => void) | null = null;
   private mediaFinishes = new WeakMap<HTMLMediaElement, { src: string; duration: number }>();
   private mutationTimer: ReturnType<typeof setTimeout> | null = null;
+  private guard: PlaybackGuard | null = null;
   private disposed = false;
 
   constructor(private readonly hostWindow: Window) {}
@@ -71,6 +85,24 @@ export class FrameAgent {
     });
     this.observe();
     this.startMediaReporter();
+    // 子 frame 内也可能是 SPA/任务点路由：URL 变化时重新握手，Host 才能更新签名并触发翻页校验。
+    this.urlTimer = setInterval(() => this.checkUrlChange(), 1500);
+    window.addEventListener("popstate", this.onUrlChange);
+    window.addEventListener("hashchange", this.onUrlChange);
+  }
+
+  private onUrlChange = (): void => {
+    this.checkUrlChange();
+  };
+
+  private checkUrlChange(): void {
+    if (this.disposed) return;
+    if (location.href === this.lastUrl) return;
+    this.lastUrl = location.href;
+    this.detect();
+    this.lastSignature = "";
+    resetSubmitGuard(document);
+    this.sendHello();
   }
 
   private detect(): boolean {
@@ -114,6 +146,7 @@ export class FrameAgent {
         url: location.href,
         title: document.title,
         pageKind: page.kind,
+        nonce: this.nonce,
       }),
     );
   }
@@ -136,9 +169,12 @@ export class FrameAgent {
   private onMessage = (event: MessageEvent): void => {
     if (!this.adapter || !this.context) return;
     if (event.source !== this.hostWindow && event.source !== window.parent) return;
-    const message = event.data;
-    if (!isFrameMessage(message)) return;
+    // 只接受来自学习通/教育网父页面的指令；第三方站点嵌入时不得驱动填入/提交。
+    if (!isTrustedOrigin(event.origin)) return;
+    const message = validateFrameMessage(event.data);
+    if (!message) return;
     if (message.t === "WELCOME") {
+      if (message.nonce !== this.nonce) return;
       this.token = message.token;
       this.stopHello();
       this.startHeartbeat();
@@ -164,6 +200,12 @@ export class FrameAgent {
         break;
       case "PAUSE_MEDIA":
         this.pauseMedia();
+        break;
+      case "GUARD_START":
+        this.startGuard();
+        break;
+      case "GUARD_STOP":
+        this.stopGuard();
         break;
       default:
         break;
@@ -257,7 +299,13 @@ export class FrameAgent {
           t: "MEDIA_STATE",
           token: this.token,
           frameId: this.frameId,
-          state: { hasMedia, allEnded, anyPaused, ...taskState },
+          state: {
+            hasMedia,
+            allEnded,
+            anyPaused,
+            chapterId: chapterIdFromUrl(location.href) || undefined,
+            ...taskState,
+          },
         }),
       );
     } catch (error) {
@@ -266,6 +314,8 @@ export class FrameAgent {
   }
 
   private pauseMedia(): void {
+    // 脚本主动暂停：先让守卫进入 suspend，避免它把刚暂停的视频又恢复。
+    this.guard?.suspend();
     for (const media of collectMedia(document)) {
       try {
         if (!media.paused) media.pause();
@@ -276,9 +326,43 @@ export class FrameAgent {
     this.reportMediaState();
   }
 
+  private startGuard(): void {
+    if (this.guard || this.disposed) return;
+    this.guard = startPlaybackGuard({
+      doc: document,
+      isEnabled: () => getSettings().video.resumeOnPause,
+      // 只保活主播放器；同页的预加载/隐藏媒体不参与自动恢复。
+      collectMedia: () => {
+        const primary = pickPrimaryMedia(collectDocumentMedia(document));
+        return primary ? [primary] : [];
+      },
+      onNotice: (message, level) => this.sendGuardNotice(message, level),
+    });
+  }
+
+  private stopGuard(): void {
+    this.guard?.stop();
+    this.guard = null;
+  }
+
+  private sendGuardNotice(message: string, level: "info" | "warn"): void {
+    if (!this.token || this.disposed) return;
+    sendToWindow(
+      this.hostWindow,
+      createMessage({
+        t: "GUARD_NOTICE",
+        token: this.token,
+        frameId: this.frameId,
+        level,
+        message,
+      }),
+    );
+  }
+
   private async resumeMedia(): Promise<void> {
     const settings = getSettings();
     if (!settings.video.resumeOnPause) return;
+    this.guard?.resume();
     const primary = pickPrimaryMedia(collectMedia(document));
     if (!primary) {
       this.reportMediaState();
@@ -306,6 +390,8 @@ export class FrameAgent {
   }
 
   private collectAndSend(force = false): void {
+    // 未收到 WELCOME 前不采集：消息会被 Host 丢弃，白白消耗字体解码与 DOM 查询。
+    if (!this.token) return;
     this.detect();
     if (!this.adapter || !this.context) {
       if (this.token) {
@@ -458,6 +544,13 @@ export class FrameAgent {
   dispose(): void {
     this.disposed = true;
     this.stopHello();
+    this.stopGuard();
+    if (this.urlTimer) {
+      clearInterval(this.urlTimer);
+      this.urlTimer = null;
+    }
+    window.removeEventListener("popstate", this.onUrlChange);
+    window.removeEventListener("hashchange", this.onUrlChange);
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;

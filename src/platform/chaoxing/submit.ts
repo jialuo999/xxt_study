@@ -11,6 +11,7 @@
  */
 import type { SubmitResult } from "../../core/types";
 import type { PageContext, SubmitOptions } from "../types";
+import { logger } from "../../core/logger";
 import { unsafeWindowRef } from "../../core/gm";
 import { sleep } from "../../utils/async";
 import { clickElement, queryAll, queryFirst, textOf } from "../../utils/dom";
@@ -19,10 +20,22 @@ import {
   SUBMIT_BUTTON_SELECTORS,
   SUBMIT_TEXT_KEYWORDS,
 } from "./selectors";
+import { detectVerificationChallenge } from "./verification";
 
 const SUBMIT_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 250;
 const MAX_BUTTON_TEXT_LENGTH = 20;
+
+/** 登录/风控页 URL 特征：命中时即使 URL 变化也不能判提交成功 */
+const AUTH_URL_PATTERN =
+  /(?:^|[/._-])(?:passport|login|logon|sso|cas|captcha|verify)(?:[/._-]|$)/i;
+
+/**
+ * 结果页 URL 特征：命中才把“URL 变化”视为提交成功。
+ * 只认明显的结果路由，避免把同一作答页（如 /work/doHomeWorkNew）的参数变化当成成功。
+ */
+const RESULT_URL_PATTERN =
+  /(?:^|[/?#=&._-])(?:result|results|score|scores|finish|finished|complete|completed|success|submitted)(?:[/?#=&._-]|$)|\/work\/(?:selectWorkQuestionYiPiYue|dowork\/result)|\/exam-ans\/exam\/(?:test\/)?(?:reVersionPaperMarkContentNew|result)/i;
 
 /** 已经提交过的 document；避免 watch/自动流程在一次页面上重复交卷 */
 const submittedDocuments = new WeakSet<Document>();
@@ -65,6 +78,48 @@ function comparableUrl(url: string): string {
   }
 }
 
+/** 日志用 URL：只保留 origin + pathname，去掉 query/hash 等可能含敏感信息的参数 */
+function sanitizedUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url.split("?")[0].split("#")[0];
+  }
+}
+
+/** 是否跳到了登录/单点登录/验证码等“非提交结果”页面 */
+function isAuthUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return AUTH_URL_PATTERN.test(`${parsed.hostname}${parsed.pathname}`);
+  } catch {
+    return AUTH_URL_PATTERN.test(url);
+  }
+}
+
+/** URL 是否命中作业/考试的结果页特征（不含登录、验证码页） */
+function isResultPageUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return RESULT_URL_PATTERN.test(`${parsed.pathname}${parsed.search}`);
+  } catch {
+    return RESULT_URL_PATTERN.test(url);
+  }
+}
+
+function isAuthOrChallengePage(ctx: PageContext, url: string): boolean {
+  if (isAuthUrl(url)) return true;
+  try {
+    return detectVerificationChallenge(ctx.doc).detected;
+  } catch {
+    return false;
+  }
+}
+
 function isActionable(element: HTMLElement): boolean {
   try {
     if (element.hasAttribute("disabled")) return false;
@@ -92,6 +147,15 @@ export function findSubmitButton(doc: Document): HTMLElement | null {
     "[onclick]",
   ]);
   for (const element of candidates) {
+    // 先用 textContent 预筛，避免逐个 innerText 造成大页面布局抖动。
+    const rawText = `${element.textContent ?? ""}${element.getAttribute("value") ?? ""}`.replace(
+      /\s+/g,
+      "",
+    );
+    if (!rawText || rawText.length > MAX_BUTTON_TEXT_LENGTH) continue;
+    if (!SUBMIT_TEXT_KEYWORDS.some((keyword) => rawText === keyword || rawText.includes(keyword))) {
+      continue;
+    }
     const text = `${textOf(element)}${element.getAttribute("value") ?? ""}`.replace(/\s+/g, "");
     if (!text || text.length > MAX_BUTTON_TEXT_LENGTH) continue;
     if (!SUBMIT_TEXT_KEYWORDS.some((keyword) => text === keyword || text.includes(keyword))) continue;
@@ -165,11 +229,43 @@ async function waitForOutcome(
 ): Promise<SubmitResult> {
   const startedAt = Date.now();
   const comparableBefore = comparableUrl(beforeUrl);
+  // 记录“已跳转但无法确认结果”的 URL：超时时优先返回该地址
+  let redirectedTo: string | null = null;
   while (Date.now() - startedAt < SUBMIT_TIMEOUT_MS) {
     const url = currentUrl(ctx);
-    if (url && comparableBefore && comparableUrl(url) !== comparableBefore) {
-      const text = textOf(ctx.doc.body);
-      return { ok: true, message: "提交后页面已跳转", score: extractScore(text), url };
+    const changed = Boolean(url && comparableBefore && comparableUrl(url) !== comparableBefore);
+    if (changed) {
+      redirectedTo = url;
+      // 登录/验证码跳转：明确不代表提交成功
+      if (isAuthOrChallengePage(ctx, url)) {
+        logger.debug(
+          "submit",
+          `提交后跳转到登录/验证页，不判成功：${sanitizedUrl(beforeUrl)} → ${sanitizedUrl(url)}`,
+        );
+        return {
+          ok: false,
+          message: "提交后页面跳转到登录/验证页，提交状态未知，请人工确认",
+          url,
+        };
+      }
+      // 只有命中结果页特征才按“跳转”判成功
+      if (isResultPageUrl(url)) {
+        logger.debug(
+          "submit",
+          `提交后跳转到结果页：${sanitizedUrl(beforeUrl)} → ${sanitizedUrl(url)}`,
+        );
+        const text = textOf(ctx.doc.body);
+        return {
+          ok: true,
+          message: "提交后页面已跳转至结果页",
+          score: extractScore(text),
+          url,
+        };
+      }
+      logger.debug(
+        "submit",
+        `提交后 URL 变化但未命中结果页特征：${sanitizedUrl(beforeUrl)} → ${sanitizedUrl(url)}`,
+      );
     }
     const currentText = textOf(ctx.doc.body);
     const keyword = findNewResultKeyword(beforeText, currentText);
@@ -182,6 +278,13 @@ async function waitForOutcome(
       };
     }
     await sleep(POLL_INTERVAL_MS);
+  }
+  if (redirectedTo) {
+    return {
+      ok: false,
+      message: "页面已跳转但未检测到提交结果，提交状态未知，请人工确认",
+      url: redirectedTo,
+    };
   }
   return {
     ok: false,

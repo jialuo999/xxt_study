@@ -183,6 +183,42 @@ describe("AutoTurnRunner 翻页校验", () => {
     expect(lastState.steps).toBe(1);
   });
 
+  it("翻页按钮晚加载时短暂重试，而不是立即停止", async () => {
+    updateSettings({ autoTurn: { maxSteps: 1 } });
+    let signature = "retry-1";
+    let calls = 0;
+    const host = makeHost({ signature: () => signature });
+    host.nextPage.mockImplementation(async () => {
+      calls += 1;
+      if (calls < 3) {
+        return { ok: false, action: "none", message: "未找到「下一节」按钮", url: "" };
+      }
+      signature = "retry-2";
+      return { ok: true, action: "click:test", message: "已点击下一节", url: "" };
+    });
+
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(12000);
+    runner.stop("测试结束");
+
+    expect(calls).toBe(3);
+    expect(host.states.some((state) => state.steps === 1)).toBe(true);
+    expect(host.stopped.some((reason) => reason.includes("未找到"))).toBe(false);
+  });
+
+  it("连续三次找不到翻页按钮时才停止", async () => {
+    const host = makeHost({ signature: () => "missing" });
+    host.nextPage.mockResolvedValue({ ok: false, action: "none", message: "未找到「下一节」按钮", url: "" });
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(12000);
+
+    expect(host.nextPage).toHaveBeenCalledTimes(3);
+    expect(host.stopped.some((reason) => reason.includes("未找到"))).toBe(true);
+    expect(runner.isRunning).toBe(false);
+  });
+
   it("当前任务点未完成时不会跳过视频等待", async () => {
     const host = makeHost({ signature: () => "unfinished" });
     host.getChildMediaState = () => ({

@@ -76,6 +76,19 @@ export function BankPage({ controller, state }: PageProps) {
 
   return (
     <div class="sh-stack">
+      {state.bank.storage === "memory" ? (
+        <Card accent>
+          <div class="sh-row" style="align-items:flex-start">
+            <Icon name="alert" size={16} />
+            <div class="sh-grow">
+              <div class="sh-card__title">当前为内存模式，刷新会丢失题库</div>
+              <div class="sh-card__hint">
+                浏览器 IndexedDB 不可用（隐私模式/策略限制）。导入的题库只保存在当前页面内存中，请先导出备份，或更换浏览器设置后重新导入。
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
       <div class="sh-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
         <Card>
           <div class="sh-stat">
@@ -128,7 +141,7 @@ export function BankPage({ controller, state }: PageProps) {
             ref={fileRef}
             class="sh-file"
             type="file"
-            accept=".json,.jsonl,.csv,.tsv,.txt,application/json,text/csv,text/plain"
+            accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/plain"
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => void handleFiles(event.currentTarget.files)}
           />

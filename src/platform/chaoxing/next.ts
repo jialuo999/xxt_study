@@ -84,6 +84,12 @@ export async function nextPage(ctx: PageContext): Promise<NextResult> {
     const candidates = queryAll<HTMLElement>(ctx.doc, ["a", "button", "span", "i", "div", "li"]);
     for (const element of candidates) {
       if (wasAttempted(element)) continue;
+      // 先用 textContent 做低成本预筛，避免对页面里数千个导航节点逐个读取 innerText（触发布局）。
+      const rawText = (element.textContent ?? "").replace(/\s+/g, "");
+      if (!rawText || rawText.length > MAX_NEXT_TEXT_LENGTH) continue;
+      if (!NEXT_TEXT_KEYWORDS.some((keyword) => rawText === keyword || rawText.includes(keyword))) {
+        continue;
+      }
       const text = textOf(element).replace(/\s+/g, "");
       if (!text || text.length > MAX_NEXT_TEXT_LENGTH) continue;
       if (!NEXT_TEXT_KEYWORDS.some((keyword) => text === keyword || text.includes(keyword))) continue;

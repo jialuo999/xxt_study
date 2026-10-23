@@ -1,13 +1,16 @@
 import { getSettings } from "@/core/settings-store";
-import type { VideoSettings } from "@/core/settings";
 import type { MediaState, PageInfo } from "@/core/types";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { jitter, sleep } from "@/utils/async";
 import { logger } from "@/core/logger";
 import type { AutoTurnView } from "@/ui/contract";
-import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
+import { findMedia, waitForMedia, type MediaWaitResult } from "./media-wait";
+import { taskUrlKey, type MediaPlaybackTarget } from "./media-target";
+
+export type { MediaPlaybackTarget } from "./media-target";
 
 const SESSION_KEY = "study-helper.autoturn.v1";
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const MEDIA_WAIT_TIMEOUT = 45 * 60 * 1000;
 
 interface AutoTurnSession {
@@ -15,6 +18,7 @@ interface AutoTurnSession {
   steps: number;
   visited: string[];
   lastUrl: string;
+  savedAt?: number;
 }
 
 export interface AutoTurnHost {
@@ -34,22 +38,13 @@ export interface AutoTurnHost {
   getTaskSignature(): string;
   /** 平台是否弹出人机验证（【9010】验证码页）；检测到后不得继续点击 */
   hasVerificationChallenge(): boolean;
+  /** 自动翻页真正开始（含刷新后恢复）时调用，用于启动播放守卫等 */
+  onStarted?(): void;
   onState(state: AutoTurnView): void;
   onStopped(reason: string): void;
 }
 
-/** 学习通同页多任务点时的播放目标 */
-export interface MediaPlaybackTarget {
-  /** 匹配到的子 frame；null 表示任务点 iframe 尚未连接或全部完成 */
-  frameId: string | null;
-  taskUrl: string;
-  taskIndex: number;
-  taskTotal: number;
-  state: MediaState | null;
-  allTasksFinished: boolean;
-  /** tasks：按任务点 DOM 顺序；frames：任务点信息不足时按子 frame 连接顺序兜底 */
-  source?: "tasks" | "frames";
-}
+/** 学习通同页多任务点时的播放目标（定义在 media-target.ts，便于纯函数测试） */
 
 export class AutoTurnRunner {
   private running = false;
@@ -63,6 +58,14 @@ export class AutoTurnRunner {
     return this.running;
   }
 
+  /** 是否存在“刷新后待恢复”的会话（Host 用于先抢多标签锁再恢复） */
+  hasRestorableSession(): boolean {
+    const settings = getSettings();
+    if (!settings.autoTurn.enabled || !settings.autoTurn.resumeOnReload) return false;
+    const session = readSession();
+    return Boolean(session?.running);
+  }
+
   /** 刷新后恢复上次运行 */
   restore(): void {
     const settings = getSettings();
@@ -72,9 +75,16 @@ export class AutoTurnRunner {
     }
     const session = readSession();
     if (!session?.running) return;
+    // 只恢复同一页面/章节的会话，避免隔了很久在任意章节页刷新时“自己动起来”。
+    if (session.lastUrl && taskUrlKey(session.lastUrl) !== taskUrlKey(location.href)) {
+      logger.info("autoturn", "忽略过期的自动翻页会话（页面已变化）");
+      this.persist(false);
+      return;
+    }
     this.running = true;
     this.steps = session.steps;
     this.visited = session.visited ?? [];
+    this.host.onStarted?.();
     logger.info("autoturn", `恢复自动翻页（第 ${this.steps} 步）`);
     this.emit("已恢复自动翻页，即将继续");
     setTimeout(() => void this.loop(), Math.max(800, settings.autoTurn.startDelayMs));
@@ -88,6 +98,7 @@ export class AutoTurnRunner {
     this.steps = 0;
     this.visited = [];
     this.persist(true);
+    this.host.onStarted?.();
     logger.info("autoturn", "开始自动翻页");
     const delay = Math.max(0, settings.autoTurn.startDelayMs);
     this.emit(delay ? `将在 ${Math.ceil(delay / 1000)} 秒后开始` : "准备开始自动翻页", false, Date.now() + delay);
@@ -97,15 +108,17 @@ export class AutoTurnRunner {
   }
 
   stop(reason = "已停止自动翻页"): void {
+    if (!this.running) {
+      // 未运行时的 stop 不得暂停用户正在播放的媒体；只清理残留会话。
+      this.persist(false);
+      this.emit(reason, true);
+      return;
+    }
     // 停止翻页后立即暂停视频/音频，避免声音继续播放
     try {
       this.host.pauseMedia();
     } catch {
       /* ignore */
-    }
-    if (!this.running) {
-      this.emit(reason, true);
-      return;
     }
     this.running = false;
     this.loopToken++;
@@ -234,6 +247,7 @@ export class AutoTurnRunner {
             MEDIA_WAIT_TIMEOUT,
             isAlive,
             settings.video,
+            (message) => this.emit(message, false),
           );
           if (!this.running || token !== this.loopToken) return;
           if (localResult === "blocked") {
@@ -289,16 +303,25 @@ export class AutoTurnRunner {
     const before = this.host.getTaskSignature();
     logger.debug("autoturn", "翻页前任务签名", before);
     let result;
-    try {
-      result = await adapter.nextPage(context);
-    } catch (error) {
-      logger.error("autoturn", "翻页时出错", error);
-      this.stop("翻页出错，已暂停");
-      return;
+    // 页面/按钮可能比任务点晚加载：找不到按钮时短暂重试，而不是立刻停机。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await adapter.nextPage(context);
+      } catch (error) {
+        logger.error("autoturn", "翻页时出错", error);
+        this.stop("翻页出错，已暂停");
+        return;
+      }
+      if (!this.running || token !== this.loopToken) return;
+      if (result.ok) break;
+      if (attempt < 2) {
+        this.emit(result.message || "等待「下一节」按钮…", false);
+        logger.debug("autoturn", "翻页按钮不可用，稍后重试", { attempt: attempt + 1 });
+        await sleep(700 * (attempt + 1));
+      }
     }
-    if (!this.running || token !== this.loopToken) return;
-    if (!result.ok) {
-      this.stop(result.message || "翻页失败，已暂停");
+    if (!result?.ok) {
+      this.stop(result?.message || "翻页失败，已暂停");
       return;
     }
 
@@ -537,6 +560,7 @@ export class AutoTurnRunner {
       steps: this.steps,
       visited: this.visited.slice(-30),
       lastUrl: location.href,
+      savedAt: Date.now(),
     };
     try {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -550,188 +574,23 @@ function readSession(): AutoTurnSession | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as AutoTurnSession;
+    const parsed = JSON.parse(raw) as AutoTurnSession;
+    if (
+      typeof parsed?.running !== "boolean" ||
+      !Number.isFinite(parsed.steps) ||
+      !Array.isArray(parsed.visited)
+    ) {
+      return null;
+    }
+    if (parsed.savedAt !== undefined) {
+      if (!Number.isFinite(parsed.savedAt)) return null;
+      if (Date.now() - parsed.savedAt > SESSION_TTL_MS) return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
 }
 
-export type MediaWaitResult = "done" | "none" | "blocked" | "timeout" | "stalled";
-
-function findMedia(doc: Document): HTMLMediaElement[] {
-  return collectMedia(doc);
-}
-
-/** 媒体所在任务点是否已完成（学习通 .ans-job-finished） */
-function isTaskPointFinished(media: HTMLMediaElement): boolean {
-  try {
-    return Boolean(media.closest(".ans-job-finished"));
-  } catch {
-    return false;
-  }
-}
-
-/** 等待页面中的视频/音频播放结束；暂停时按设置尝试恢复播放 */
-export async function waitForMedia(
-  doc: Document,
-  timeoutMs: number,
-  isAlive: () => boolean,
-  preferences: VideoSettings = getSettings().video,
-): Promise<MediaWaitResult> {
-  let allMedia = findMedia(doc);
-  if (allMedia.length === 0 && doc.querySelector("iframe")) {
-    // 章节页 iframe 可能尚未加载完，给播放器一点出现时间
-    for (let attempt = 0; attempt < 10; attempt++) {
-      if (!isAlive()) return "none";
-      await sleep(500);
-      allMedia = findMedia(doc);
-      if (allMedia.length > 0) break;
-    }
-  }
-  if (allMedia.length === 0) return "none";
-
-  const started = Date.now();
-  const pausedSince = new Map<HTMLMediaElement, number>();
-  const lastAttempt = new Map<HTMLMediaElement, number>();
-  const finished = new WeakMap<HTMLMediaElement, { src: string; duration: number }>();
-
-  const mediaSource = (element: HTMLMediaElement): string => {
-    try {
-      return element.currentSrc || element.src || "";
-    } catch {
-      return "";
-    }
-  };
-
-  const mediaDuration = (element: HTMLMediaElement): number => {
-    try {
-      return element.duration;
-    } catch {
-      return Number.NaN;
-    }
-  };
-
-  const markFinished = (element: HTMLMediaElement): void => {
-    const src = mediaSource(element);
-    const duration = mediaDuration(element);
-    let nearEnd = false;
-    try {
-      nearEnd = duration > 0 && duration - element.currentTime <= 1;
-    } catch {
-      /* ignore */
-    }
-    let ended = false;
-    try {
-      ended = element.ended;
-    } catch {
-      /* ignore */
-    }
-    if (ended || nearEnd) finished.set(element, { src, duration });
-  };
-
-  const isFinished = (element: HTMLMediaElement): boolean => {
-    const src = mediaSource(element);
-    const duration = mediaDuration(element);
-    const previous = finished.get(element);
-    if (previous && (previous.src !== src || Math.abs(previous.duration - duration) > 1)) {
-      // 切换到了新的视频/分段，重新等待
-      finished.delete(element);
-    }
-    markFinished(element);
-    return finished.has(element);
-  };
-
-  const onFinishEvent = (event: Event) => {
-    const target = event.target;
-    if (target instanceof HTMLMediaElement) markFinished(target);
-  };
-  document.addEventListener("ended", onFinishEvent, true);
-  document.addEventListener("timeupdate", onFinishEvent, true);
-
-  const cleanup = () => {
-    document.removeEventListener("ended", onFinishEvent, true);
-    document.removeEventListener("timeupdate", onFinishEvent, true);
-  };
-
-  const tryResume = async (element: HTMLMediaElement, now: number) => {
-    let paused = false;
-    try {
-      paused = element.paused;
-    } catch {
-      return;
-    }
-    if (!paused || isFinished(element)) {
-      pausedSince.delete(element);
-      return;
-    }
-    const last = lastAttempt.get(element) ?? 0;
-    if (now - last < 2000) return;
-    lastAttempt.set(element, now);
-    focusMedia(element);
-    try {
-      // play() 可能因浏览器自动播放策略被拒绝；保持静音可显著提高成功率
-      if (preferences.defaultMuted) element.muted = true;
-      await element.play();
-    } catch {
-      // 部分播放器需要鼠标聚焦/点击视频区域后才允许播放
-      try {
-        element.click();
-      } catch {
-        /* ignore */
-      }
-      try {
-        await element.play();
-      } catch {
-        /* 由下面的 blocked 判定处理 */
-      }
-    }
-  };
-
-  while (Date.now() - started < timeoutMs) {
-    if (!isAlive()) {
-      cleanup();
-      return "none";
-    }
-    // 多视频/音频页面：只跟踪“未完成任务点”的媒体，并按 DOM 顺序逐个等待，
-    // 避免主播放器启发式在多个媒体之间来回切换导致进度跳动。
-    const connected = findMedia(doc).filter((element) => element.isConnected);
-    const unfinished = connected.filter(
-      (element) => !isTaskPointFinished(element) && !isFinished(element),
-    );
-    if (unfinished.length === 0) {
-      cleanup();
-      return connected.length > 0 ? "done" : "none";
-    }
-    const primary = pickPrimaryMedia(unfinished);
-    if (!primary) {
-      cleanup();
-      return "none";
-    }
-
-    const now = Date.now();
-    if (preferences.resumeOnPause) {
-      await tryResume(primary, now);
-
-      let paused = false;
-      try {
-        paused = primary.paused;
-      } catch {
-        paused = false;
-      }
-      if (!paused) {
-        pausedSince.delete(primary);
-      } else {
-        if (!pausedSince.has(primary)) pausedSince.set(primary, now);
-        const pausedFor = now - (pausedSince.get(primary) ?? now);
-        if (pausedFor > 5000) {
-          cleanup();
-          return "blocked";
-        }
-      }
-    }
-
-    await sleep(1000);
-  }
-  cleanup();
-  return "timeout";
-}
+export { waitForMedia } from "./media-wait";
+export type { MediaWaitResult } from "./media-wait";

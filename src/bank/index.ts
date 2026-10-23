@@ -454,7 +454,8 @@ export async function importBankText(
 /** 根据文件名推断导入格式 */
 export function detectBankFormat(filename: string): BankTextFormat {
   const lower = String(filename ?? "").toLowerCase();
-  if (lower.endsWith(".json") || lower.endsWith(".jsonl")) return "json";
+  // 只把真正的 JSON 当 json：.jsonl（逐行 JSON）当前解析器不支持，按 txt 处理
+  if (lower.endsWith(".json")) return "json";
   if (lower.endsWith(".tsv") || lower.endsWith(".tab")) return "tsv";
   if (lower.endsWith(".csv")) return "csv";
   return "txt";

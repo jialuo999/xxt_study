@@ -15,7 +15,11 @@ export function getAdapter(url: URL = new URL(location.href)): PlatformAdapter |
   }
   const generic = getSettings().advanced.genericConfig;
   if (generic && generic.questionContainer && generic.stem) {
-    if (generic.matches.some((pattern) => matchPattern(pattern, url))) {
+    // 手工编辑/旧版本写入的 genericConfig.matches 可能不是字符串数组；
+    // 这里做类型守卫，避免一个坏字段让 getAdapter 抛错、面板永久卡在“初始化”。
+    const matches = Array.isArray(generic.matches) ? generic.matches : [];
+    const patterns = matches.filter((pattern): pattern is string => typeof pattern === "string");
+    if (patterns.some((pattern) => matchPattern(pattern, url))) {
       try {
         return createConfigAdapter(generic);
       } catch {

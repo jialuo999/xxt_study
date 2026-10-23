@@ -15,8 +15,10 @@ export type FrameMessage =
       url: string;
       title: string;
       pageKind: PageKind;
+      /** 一次性随机数，由 Host 在 WELCOME 回显，避免任意父页面冒充 Host */
+      nonce: string;
     })
-  | (BaseMessage & { t: "WELCOME"; token: string })
+  | (BaseMessage & { t: "WELCOME"; token: string; nonce: string })
   | (BaseMessage & {
       t: "STATE";
       token: string;
@@ -43,12 +45,28 @@ export type FrameMessage =
   | (BaseMessage & { t: "MEDIA_STATE"; token: string; frameId: string; state: MediaState })
   | (BaseMessage & { t: "RESUME_MEDIA"; token: string })
   | (BaseMessage & { t: "PAUSE_MEDIA"; token: string })
+  | (BaseMessage & { t: "GUARD_START"; token: string })
+  | (BaseMessage & { t: "GUARD_STOP"; token: string })
+  | (BaseMessage & {
+      t: "GUARD_NOTICE";
+      token: string;
+      frameId: string;
+      level: "info" | "warn";
+      message: string;
+    })
   | (BaseMessage & { t: "NEXT"; token: string })
   | (BaseMessage & { t: "COLLECT"; token: string })
   | (BaseMessage & { t: "PING"; token: string })
   | (BaseMessage & { t: "PONG"; token: string });
 
-export function createMessage<T extends Omit<FrameMessage, "sh" | "v">>(message: T): FrameMessage {
+/**
+ * 分布式 Omit：直接 `Omit<联合类型, K>` 会退化成公共字段（只剩 t），
+ * 导致 createMessage 缺少字段也能编译通过。
+ */
+type DistributedOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type FramePayload = DistributedOmit<FrameMessage, "sh" | "v">;
+
+export function createMessage<T extends FramePayload>(message: T): FrameMessage {
   return { ...message, sh: MSG_MARK, v: MSG_VERSION } as unknown as FrameMessage;
 }
 
@@ -56,6 +74,119 @@ export function isFrameMessage(data: unknown): data is FrameMessage {
   if (!data || typeof data !== "object") return false;
   const record = data as Record<string, unknown>;
   return record.sh === MSG_MARK && record.v === MSG_VERSION && typeof record.t === "string";
+}
+
+const MAX_ITEMS = 500;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 4000;
+}
+
+/**
+ * 按消息类型做基础载荷校验。
+ *
+ * 只校验跨 frame 边界必须可信的字段与长度，避免任意页面伪造 HELLO/题目/媒体状态，
+ * 也避免把超大 payload 传进渲染路径。校验失败返回 null，调用方直接忽略。
+ */
+export function validateFrameMessage(data: unknown): FrameMessage | null {
+  if (!isFrameMessage(data)) return null;
+  const message = data as unknown as Record<string, unknown>;
+  const t = message.t;
+
+  switch (t) {
+    case "HELLO":
+      if (
+        !isString(message.frameId) ||
+        !isString(message.url) ||
+        !isString(message.title) ||
+        !isString(message.nonce) ||
+        !isString(message.pageKind)
+      ) {
+        return null;
+      }
+      return data;
+    case "WELCOME":
+      return isString(message.token) && isString(message.nonce) ? data : null;
+    case "STATE":
+      return ["token", "frameId", "url", "pageKind"].every((key) => isString(message[key]))
+        ? data
+        : null;
+    case "QUESTIONS":
+      if (
+        !isString(message.token) ||
+        !isString(message.frameId) ||
+        !isString(message.pageKind) ||
+        !Array.isArray(message.questions) ||
+        message.questions.length > MAX_ITEMS
+      ) {
+        return null;
+      }
+      return message.questions.every(
+        (question) =>
+          isRecord(question) &&
+          isString(question.id) &&
+          isString(question.type) &&
+          isString(question.stem) &&
+          Array.isArray(question.options),
+      )
+        ? data
+        : null;
+    case "FILL":
+      if (!isString(message.token) || !Array.isArray(message.answers)) return null;
+      if (message.answers.length > MAX_ITEMS) return null;
+      return message.answers.every(
+        (answer) => isRecord(answer) && isString(answer.questionId) && "answer" in answer,
+      )
+        ? data
+        : null;
+    case "FILLED":
+      return isString(message.token) &&
+        isString(message.frameId) &&
+        Array.isArray(message.results)
+        ? data
+        : null;
+    case "SUBMIT":
+      return isString(message.token) ? data : null;
+    case "SUBMIT_RESULT":
+      return isString(message.token) &&
+        isString(message.frameId) &&
+        isRecord(message.result)
+        ? data
+        : null;
+    case "MEDIA_STATE": {
+      const state = message.state;
+      if (!isString(message.token) || !isString(message.frameId) || !isRecord(state)) {
+        return null;
+      }
+      return typeof state.hasMedia === "boolean" &&
+        typeof state.allEnded === "boolean" &&
+        typeof state.anyPaused === "boolean"
+        ? data
+        : null;
+    }
+    case "GUARD_NOTICE":
+      return isString(message.token) &&
+        isString(message.frameId) &&
+        isString(message.message) &&
+        (message.level === "info" || message.level === "warn")
+        ? data
+        : null;
+    case "RESUME_MEDIA":
+    case "PAUSE_MEDIA":
+    case "GUARD_START":
+    case "GUARD_STOP":
+    case "NEXT":
+    case "COLLECT":
+    case "PING":
+    case "PONG":
+      return isString(message.token) ? data : null;
+    default:
+      return null;
+  }
 }
 
 export function createToken(): string {

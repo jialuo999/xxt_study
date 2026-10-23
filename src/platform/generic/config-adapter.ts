@@ -20,7 +20,8 @@ import type {
 } from "../../core/types";
 import type { GenericAdapterConfig } from "../../core/settings";
 import type { FillOptions, PageContext, PlatformAdapter, SubmitOptions } from "../types";
-import { jitter, sleep, withTimeout } from "../../utils/async";
+import { logger } from "../../core/logger";
+import { jitter, sleep } from "../../utils/async";
 import {
   clickElement,
   clickInputLabel,
@@ -357,8 +358,28 @@ async function applyFill(
     "input:not([type])",
     "textarea",
   ]);
+  // 与学习通适配器保持一致：数量不一致不再静默成功
+  const countMismatch = values.length !== blanks.length;
+  if (values.length > blanks.length) {
+    logger.warn(
+      "generic",
+      `填空题答案多于页面空数：答案 ${values.length} 空 / 页面 ${blanks.length} 空，多余答案被忽略`,
+      { questionId },
+    );
+  }
   if (dryRun) {
-    return { questionId, ok: blanks.length > 0, expected, actual: "", message: "dryRun：填空计划" };
+    return {
+      questionId,
+      ok: blanks.length > 0 && values.length > 0 && !countMismatch,
+      expected,
+      actual: "",
+      message:
+        blanks.length === 0
+          ? "dryRun：未找到填空输入框"
+          : countMismatch
+            ? `dryRun：答案 ${values.length} 空 / 页面 ${blanks.length} 空，数量不一致`
+            : `dryRun：计划填写 ${values.length} 个空`,
+    };
   }
   if (blanks.length === 0) return { questionId, ok: false, expected, message: "未找到填空输入框" };
   const limit = Math.min(values.length, blanks.length);
@@ -366,13 +387,21 @@ async function applyFill(
     setNativeValue(blanks[index], values[index] ?? "");
     await pause(delay);
   }
-  const actual = blanks.slice(0, limit).map((blank) => blank.value);
+  // 回读全部空位（含未填项）
+  const actual = blanks.map((blank) => blank.value);
+  const readbackOk =
+    actual.length === values.length &&
+    actual.every((item, index) => item.trim() === (values[index] ?? "").trim());
   return {
     questionId,
-    ok: actual.every((item, index) => item.trim() === (values[index] ?? "").trim()),
+    ok: !countMismatch && readbackOk,
     expected,
     actual: actual.join(" | "),
-    message: "已填写填空",
+    message: countMismatch
+      ? `填空数量不一致：答案 ${values.length} 空 / 页面 ${blanks.length} 空`
+      : readbackOk
+        ? "已填写填空"
+        : "填空回读不一致",
   };
 }
 
@@ -412,6 +441,72 @@ async function applyText(
     actual: target.textContent ?? "",
     message: "已填写简答题",
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 提交结果判定（URL 判定口径与学习通适配器一致；验证码 DOM 检测       */
+/* 属于平台特有逻辑，由具体平台适配器负责）                            */
+/* ------------------------------------------------------------------ */
+
+/** 登录/风控页 URL 特征：命中时即使 URL 变化也不能判提交成功 */
+const AUTH_URL_PATTERN =
+  /(?:^|[/._-])(?:passport|login|logon|sso|cas|captcha|verify)(?:[/._-]|$)/i;
+
+/** 结果页 URL 特征：命中才把“URL 变化”视为提交成功 */
+const RESULT_URL_PATTERN =
+  /(?:^|[/?#=&._-])(?:result|results|score|scores|finish|finished|complete|completed|success|submitted)(?:[/?#=&._-]|$)|\/work\/(?:selectWorkQuestionYiPiYue|dowork\/result)|\/exam-ans\/exam\/(?:test\/)?(?:reVersionPaperMarkContentNew|result)/i;
+
+/** 提交后结果文本关键字（与学习通侧措辞保持一致，供通用平台复用） */
+const RESULT_TEXT_KEYWORDS = ["提交成功", "交卷成功", "成绩", "已完成", "已提交"] as const;
+
+/** URL 比较忽略 hash：页面里的 #anchor 跳转不代表提交成功 */
+function comparableUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return url;
+  }
+}
+
+/** 日志用 URL：只保留 origin + pathname，去掉 query/hash 等可能含敏感信息的参数 */
+function sanitizedUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url.split("?")[0].split("#")[0];
+  }
+}
+
+function isAuthUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return AUTH_URL_PATTERN.test(`${parsed.hostname}${parsed.pathname}`);
+  } catch {
+    return AUTH_URL_PATTERN.test(url);
+  }
+}
+
+function isResultPageUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return RESULT_URL_PATTERN.test(`${parsed.pathname}${parsed.search}`);
+  } catch {
+    return RESULT_URL_PATTERN.test(url);
+  }
+}
+
+function findNewResultKeyword(beforeText: string, currentText: string): string | null {
+  for (const keyword of RESULT_TEXT_KEYWORDS) {
+    if (currentText.includes(keyword) && !beforeText.includes(keyword)) return keyword;
+  }
+  return null;
 }
 
 function createAdapter(config: GenericAdapterConfig): PlatformAdapter {
@@ -487,26 +582,61 @@ function createAdapter(config: GenericAdapterConfig): PlatformAdapter {
       const button = queryFirst<HTMLElement>(ctx.doc, [config.submitButton]);
       if (!button) return { ok: false, message: "未找到提交按钮，请手动提交" };
       const beforeUrl = currentUrl(ctx);
+      const beforeText = textOf(ctx.doc.body);
       if (!clickElement(button)) return { ok: false, message: "点击提交按钮失败" };
-      try {
-        await withTimeout(
-          (async () => {
-            const startedAt = Date.now();
-            while (Date.now() - startedAt < SUBMIT_TIMEOUT_MS) {
-              if (currentUrl(ctx) !== beforeUrl) return;
-              await sleep(250);
-            }
-          })(),
-          SUBMIT_TIMEOUT_MS + 500,
-          "提交结果检测",
+
+      const startedAt = Date.now();
+      // 记录“已跳转但无法确认结果”的 URL：超时时优先返回该地址
+      let redirectedTo: string | null = null;
+      while (Date.now() - startedAt < SUBMIT_TIMEOUT_MS) {
+        const url = currentUrl(ctx);
+        const changed = Boolean(
+          url && beforeUrl && comparableUrl(url) !== comparableUrl(beforeUrl),
         );
-      } catch {
-        /* 超时按未知处理 */
+        if (changed) {
+          redirectedTo = url;
+          // 登录/验证码跳转：明确不代表提交成功
+          if (isAuthUrl(url)) {
+            logger.debug(
+              "generic",
+              `提交后跳转到登录/验证页，不判成功：${sanitizedUrl(beforeUrl)} → ${sanitizedUrl(url)}`,
+            );
+            return {
+              ok: false,
+              message: "提交后页面跳转到登录/验证页，提交状态未知，请人工确认",
+              url,
+            };
+          }
+          // 只有命中结果页特征才按“跳转”判成功
+          if (isResultPageUrl(url)) {
+            logger.debug(
+              "generic",
+              `提交后跳转到结果页：${sanitizedUrl(beforeUrl)} → ${sanitizedUrl(url)}`,
+            );
+            return { ok: true, message: "已提交（页面已跳转至结果页）", url };
+          }
+          logger.debug(
+            "generic",
+            `提交后 URL 变化但未命中结果页特征：${sanitizedUrl(beforeUrl)} → ${sanitizedUrl(url)}`,
+          );
+        }
+        const currentText = textOf(ctx.doc.body);
+        const keyword = findNewResultKeyword(beforeText, currentText);
+        if (keyword) {
+          return { ok: true, message: `检测到提交结果：${keyword}`, url: currentUrl(ctx) };
+        }
+        await sleep(250);
       }
-      const changed = currentUrl(ctx) !== beforeUrl;
+      if (redirectedTo) {
+        return {
+          ok: false,
+          message: "页面已跳转但未检测到提交结果，提交状态未知，请人工确认",
+          url: redirectedTo,
+        };
+      }
       return {
-        ok: changed,
-        message: changed ? "已提交（页面已跳转）" : "已点击提交按钮，提交状态未知，请人工确认",
+        ok: false,
+        message: "已点击提交按钮，提交状态未知，请人工确认",
         url: currentUrl(ctx),
       };
     } catch (error) {

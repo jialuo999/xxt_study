@@ -16,7 +16,14 @@ export async function boot(): Promise<void> {
   }
 
   // 每一帧都应用媒体偏好；跨域 iframe 由该 iframe 内的脚本自行处理
-  startMediaPreferences();
+  const stopMediaPreferences = startMediaPreferences();
+  window.addEventListener("pagehide", () => {
+    try {
+      stopMediaPreferences();
+    } catch {
+      /* ignore */
+    }
+  });
 
   if (isTopFrame()) {
     if (document.getElementById("study-helper-host")) return;
@@ -29,6 +36,13 @@ export async function boot(): Promise<void> {
 
   const agent = new FrameAgent(findUiHost());
   agent.start();
+  window.addEventListener("pagehide", () => {
+    try {
+      agent.dispose();
+    } catch {
+      /* ignore */
+    }
+  });
   logger.debug("boot", "子 frame agent 已启动");
 }
 

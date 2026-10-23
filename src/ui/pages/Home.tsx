@@ -25,6 +25,8 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
   const pending = questions.filter((question) => results[question.id]?.status === "pending").length;
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);
   const examBlocked = page.kind === "exam" && !settings.solving.allowExam;
+  const filledCount = state.filledQuestionIds.length;
+  const hintMode = settings.solving.mode === "hint";
   const sectionStates = settings.ui.sectionStates ?? {};
   const openSolveSection = (key: SectionKey) => {
     openSection(controller, key);
@@ -207,7 +209,7 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
           <Button
             size="sm"
             icon="check"
-            disabled={busy || solved === 0 || examBlocked}
+            disabled={busy || solved === 0 || examBlocked || hintMode}
             onClick={() => void controller.fillAll()}
           >
             全部填入
@@ -216,11 +218,14 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
             size="sm"
             variant="primary"
             icon="send"
-            disabled={busy || questions.length === 0 || examBlocked}
+            disabled={busy || questions.length === 0 || examBlocked || hintMode || filledCount === 0}
             onClick={() => void controller.submit()}
           >
             提交
           </Button>
+        </div>
+        <div class="sh-hint" style="margin-top:6px">
+          已填入 {filledCount}/{questions.length} 题 · 默认人工复核
         </div>
         {questions.length > 0 ? (
           <div class="sh-hint" style="margin-top:8px">

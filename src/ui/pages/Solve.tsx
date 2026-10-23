@@ -29,6 +29,8 @@ export function SolvePage({ controller, state }: PageProps) {
   const solved = questions.filter((question) => results[question.id]?.status === "solved").length;
   const pending = questions.filter((question) => results[question.id]?.status === "pending").length;
   const failed = questions.filter((question) => results[question.id]?.status === "failed").length;
+  const filledCount = state.filledQuestionIds.length;
+  const hintMode = settings.solving.mode === "hint";
   const sectionStates = settings.ui.sectionStates ?? {};
   const confidence = Math.round(settings.solving.minConfidence * 100);
 
@@ -81,7 +83,7 @@ export function SolvePage({ controller, state }: PageProps) {
           <Button
             size="sm"
             icon="check"
-            disabled={busy || solved === 0 || examBlocked || settings.solving.mode === "hint"}
+            disabled={busy || solved === 0 || examBlocked || hintMode}
             onClick={() => void controller.fillAll()}
           >
             全部填入
@@ -89,11 +91,16 @@ export function SolvePage({ controller, state }: PageProps) {
           <Button
             size="sm"
             icon="send"
-            disabled={busy || questions.length === 0 || examBlocked}
+            disabled={busy || questions.length === 0 || examBlocked || hintMode || filledCount === 0}
             onClick={() => void controller.submit()}
           >
             提交
           </Button>
+        </div>
+        <div class="sh-hint" style="margin-top:6px">
+          {hintMode
+            ? "「仅提示」模式不会自动填入或提交"
+            : `已填入 ${filledCount}/${questions.length} 题，提交前请人工复核`}
         </div>
       </Card>
 

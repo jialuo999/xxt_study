@@ -145,16 +145,32 @@ describe("fillAnswer 填空题", () => {
     expect(inputs[1].value).toBe("上海");
   });
 
-  it("答案数量少于空数时只填前几个空", async () => {
+  it("答案数量少于空数时判失败，但仍填入能对应的空", async () => {
     const { ctx, questions } = setup(fillHtml);
     const inputs = document.querySelectorAll<HTMLInputElement>("input.inp");
     const result = await chaoxingAdapter.fillAnswer(ctx, questions[0], {
       kind: "fill",
       values: ["北京"],
     }, { delayMs: FAST });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("答案 1 空");
+    expect(result.message).toContain("页面 2 空");
     expect(inputs[0].value).toBe("北京");
     expect(inputs[1].value).toBe("");
+  });
+
+  it("答案数量多于空数时判失败并忽略多余答案", async () => {
+    const { ctx, questions } = setup(fillHtml);
+    const inputs = document.querySelectorAll<HTMLInputElement>("input.inp");
+    const result = await chaoxingAdapter.fillAnswer(ctx, questions[0], {
+      kind: "fill",
+      values: ["北京", "上海", "广州"],
+    }, { delayMs: FAST });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("答案 3 空");
+    expect(result.message).toContain("页面 2 空");
+    expect(inputs[0].value).toBe("北京");
+    expect(inputs[1].value).toBe("上海");
   });
 
   it("kind:text 的填空题按 | 拆分", async () => {
