@@ -1,6 +1,22 @@
-import { Badge, Button, Card, Icon, Select, Stat } from "@/ui/components";
+import {
+  Badge,
+  Button,
+  Card,
+  CollapsibleCard,
+  Icon,
+  Select,
+  Stat,
+} from "@/ui/components";
 import { MODE_LABEL, SOURCE_LABEL } from "@/ui/labels";
 import { PAGE_KIND_LABEL, QUESTION_TYPE_LABEL, VIDEO_RATES } from "@/core/settings";
+import { AutoTurnPanel } from "@/ui/panels/AutoTurnPanel";
+import {
+  SECTION_KEYS,
+  isSectionOpen,
+  openSection,
+  toggleSection,
+  type SectionKey,
+} from "@/ui/sections";
 import type { PageProps } from "./shared";
 
 export function HomePage({ controller, state, onNavigate }: PageProps) {
@@ -9,9 +25,10 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
   const pending = questions.filter((question) => results[question.id]?.status === "pending").length;
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);
   const examBlocked = page.kind === "exam" && !settings.solving.allowExam;
-  const openSettingsSection = (key: string) => {
-    controller.saveSettings({ ui: { sectionStates: { [key]: true } } });
-    onNavigate("settings");
+  const sectionStates = settings.ui.sectionStates ?? {};
+  const openSolveSection = (key: SectionKey) => {
+    openSection(controller, key);
+    onNavigate("solve");
   };
 
   return (
@@ -44,13 +61,18 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
             <div class="sh-grow">
               <div class="sh-card__title">考试页面已保护</div>
               <div class="sh-card__hint">
-                默认禁止在考试页自动作答。确需使用请在设置中显式开启，并自行承担平台规则风险。
+                默认禁止在考试页自动作答。确需使用请在「答题 → 答题设置」中显式开启，并自行承担平台规则风险。
               </div>
             </div>
           </div>
           <div style="margin-top:8px">
-            <Button size="sm" variant="ghost" icon="settings" onClick={() => openSettingsSection("solving")}>
-              前往设置
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="settings"
+              onClick={() => openSolveSection(SECTION_KEYS.solveSolving)}
+            >
+              去答题页设置
             </Button>
           </div>
         </Card>
@@ -62,9 +84,13 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
             <Icon name="key" size={16} />
             <div class="sh-grow">
               <div class="sh-card__title">还差一个 API Key</div>
-              <div class="sh-card__hint">填写 OpenAI 兼容接口的 Key 后即可使用 AI 解题。</div>
+              <div class="sh-card__hint">在「答题 → AI 接口」填写后即可使用 AI 解题。</div>
             </div>
-            <Button size="sm" variant="ghost" onClick={() => openSettingsSection("ai")}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => openSolveSection(SECTION_KEYS.solveAi)}
+            >
               配置
             </Button>
           </div>
@@ -136,12 +162,29 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
             <Button size="sm" icon="scan" disabled={busy} onClick={() => void controller.refresh()}>
               重新扫描
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => openSettingsSection("autoTurn")}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => openSection(controller, SECTION_KEYS.homeAutoTurn)}
+            >
               翻页设置
             </Button>
           </div>
         </div>
       </Card>
+
+      <CollapsibleCard
+        id={SECTION_KEYS.homeAutoTurn}
+        title="自动翻页设置"
+        hint="翻页规则与媒体行为"
+        summary={`${settings.autoTurn.enabled ? "翻页已启用" : "翻页未启用"} · ${
+          settings.video.defaultMuted ? "默认静音" : "不静音"
+        }`}
+        open={isSectionOpen(sectionStates, SECTION_KEYS.homeAutoTurn)}
+        onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.homeAutoTurn)}
+      >
+        <AutoTurnPanel controller={controller} state={state} />
+      </CollapsibleCard>
 
       <Card
         title="快捷操作"

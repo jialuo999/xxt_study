@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  CollapsibleCard,
   Confidence,
   EmptyState,
   Progress,
@@ -12,6 +13,9 @@ import {
 import { MODE_LABEL, SOURCE_LABEL, SOURCE_TONE, STATUS_LABEL, STATUS_TONE } from "@/ui/labels";
 import { PAGE_KIND_LABEL, QUESTION_TYPE_LABEL } from "@/core/settings";
 import { formatAnswer } from "@/utils/text";
+import { AiPanel } from "@/ui/panels/AiPanel";
+import { SolvingPanel } from "@/ui/panels/SolvingPanel";
+import { SECTION_KEYS, isSectionOpen, toggleSection } from "@/ui/sections";
 import type { Question, SolveResult } from "@/core/types";
 import type { PageProps } from "./shared";
 
@@ -25,6 +29,8 @@ export function SolvePage({ controller, state }: PageProps) {
   const solved = questions.filter((question) => results[question.id]?.status === "solved").length;
   const pending = questions.filter((question) => results[question.id]?.status === "pending").length;
   const failed = questions.filter((question) => results[question.id]?.status === "failed").length;
+  const sectionStates = settings.ui.sectionStates ?? {};
+  const confidence = Math.round(settings.solving.minConfidence * 100);
 
   const visible = questions.filter((question) => {
     if (filter === "all") return true;
@@ -90,6 +96,35 @@ export function SolvePage({ controller, state }: PageProps) {
           </Button>
         </div>
       </Card>
+
+      <CollapsibleCard
+        id={SECTION_KEYS.solveSolving}
+        title="答题设置"
+        hint="作答方式、题型与最低置信度"
+        summary={`${MODE_LABEL[settings.solving.mode]} · 最低 ${confidence}%`}
+        open={isSectionOpen(sectionStates, SECTION_KEYS.solveSolving)}
+        onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.solveSolving)}
+      >
+        <SolvingPanel controller={controller} state={state} />
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        id={SECTION_KEYS.solveAi}
+        title="AI 接口"
+        hint="OpenAI 兼容，Key 仅存本机"
+        summary={`${settings.ai.enabled ? "已启用" : "未启用"} · ${
+          settings.ai.apiKey ? "Key 已配置" : "未配置 Key"
+        }`}
+        open={isSectionOpen(sectionStates, SECTION_KEYS.solveAi)}
+        onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.solveAi)}
+        action={
+          <Badge tone={settings.ai.enabled ? "success" : "muted"}>
+            {settings.ai.enabled ? "启用" : "关闭"}
+          </Badge>
+        }
+      >
+        <AiPanel controller={controller} state={state} />
+      </CollapsibleCard>
 
       {questions.length === 0 ? (
         <EmptyState

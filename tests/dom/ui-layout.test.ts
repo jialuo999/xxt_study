@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { h, render, type ComponentChild } from "preact";
 import { App } from "../../src/ui/App";
 import { HomePage } from "../../src/ui/pages/Home";
+import { SolvePage } from "../../src/ui/pages/Solve";
 import { BankPage } from "../../src/ui/pages/Bank";
 import { SettingsPage } from "../../src/ui/pages/Settings";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
@@ -53,6 +54,24 @@ function mount(vnode: ComponentChild): HTMLElement {
   return container;
 }
 
+function sectionIds(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll<HTMLElement>("[data-section]")).map(
+    (section) => section.dataset.section ?? "",
+  );
+}
+
+function expanded(container: HTMLElement, id: string): string | null | undefined {
+  return container
+    .querySelector(`[data-section="${id}"] .sh-collapse-toggle`)
+    ?.getAttribute("aria-expanded");
+}
+
+function findButton(container: HTMLElement, text: string): HTMLElement | undefined {
+  return Array.from(container.querySelectorAll<HTMLElement>("button")).find(
+    (button) => button.textContent?.trim() === text,
+  );
+}
+
 afterEach(() => {
   for (const container of containers.splice(0)) render(null, container);
 });
@@ -80,36 +99,56 @@ describe("导航与主页布局", () => {
     expect(rate?.value).toBe("1");
   });
 
-  it("从主页进入翻页设置时先展开对应板块再跳转", () => {
+  it("主页自动翻页设置内嵌且默认收起，翻页设置按钮原地展开", () => {
     const state = makeState();
     const { controller, saveSettings } = makeController(state);
     const onNavigate = vi.fn();
     const container = mount(h(HomePage, { controller, state, onNavigate }));
 
-    const settingsButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "翻页设置",
-    );
+    expect(sectionIds(container)).toContain("home.autoTurn");
+    expect(expanded(container, "home.autoTurn")).toBe("false");
+
+    const settingsButton = findButton(container, "翻页设置");
     expect(settingsButton).toBeDefined();
     settingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { autoTurn: true } } });
-    expect(onNavigate).toHaveBeenCalledWith("settings");
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { "home.autoTurn": true } } });
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it("从题库进入远程题库设置时先展开合并后的答题板块", () => {
-    const state = makeState();
+  it("考试保护入口跳到答题页并展开答题设置", () => {
+    const state = makeState({
+      page: { kind: "exam", url: "https://example.com/exam", title: "考试", supported: true },
+    });
     const { controller, saveSettings } = makeController(state);
     const onNavigate = vi.fn();
-    const container = mount(h(BankPage, { controller, state, onNavigate }));
+    const container = mount(h(HomePage, { controller, state, onNavigate }));
 
-    const settingsButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "远程题库",
-    );
-    expect(settingsButton).toBeDefined();
-    settingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(container.textContent).toContain("考试页面已保护");
+    const entry = findButton(container, "去答题页设置");
+    expect(entry).toBeDefined();
+    entry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { solving: true } } });
-    expect(onNavigate).toHaveBeenCalledWith("settings");
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { "solve.solving": true } } });
+    expect(onNavigate).toHaveBeenCalledWith("solve");
+  });
+
+  it("缺 Key 提示跳到答题页并展开 AI 接口", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ai.enabled = true;
+    settings.ai.apiKey = "";
+    const state = makeState({ settings });
+    const { controller, saveSettings } = makeController(state);
+    const onNavigate = vi.fn();
+    const container = mount(h(HomePage, { controller, state, onNavigate }));
+
+    expect(container.textContent).toContain("还差一个 API Key");
+    const entry = findButton(container, "配置");
+    expect(entry).toBeDefined();
+    entry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { "solve.ai": true } } });
+    expect(onNavigate).toHaveBeenCalledWith("solve");
   });
 
   it("拖动悬浮球松手时同步提交位置并清除 transform", () => {
@@ -162,132 +201,162 @@ describe("导航与主页布局", () => {
   });
 });
 
-describe("设置页折叠板块", () => {
-  it("渲染 7 个可折叠板块，默认只展开答题与 AI 接口", () => {
+describe("答题页就近设置", () => {
+  it("答题设置与 AI 接口默认收起，点击标题写入对应 key", () => {
+    const state = makeState();
+    const { controller, saveSettings } = makeController(state);
+    const container = mount(h(SolvePage, { controller, state, onNavigate: () => undefined }));
+
+    expect(sectionIds(container)).toEqual(["solve.solving", "solve.ai"]);
+    expect(expanded(container, "solve.solving")).toBe("false");
+    expect(expanded(container, "solve.ai")).toBe("false");
+    expect(container.textContent).toContain("答题设置");
+    expect(container.textContent).toContain("AI 接口");
+
+    container
+      .querySelector<HTMLElement>('[data-section="solve.solving"] .sh-collapse-toggle')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { "solve.solving": true } } });
+  });
+
+  it("展开后显示答题模式、置信度与 AI 表单", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ui.sectionStates = { "solve.solving": true, "solve.ai": true };
+    const state = makeState({ settings });
+    const { controller } = makeController(state);
+    const container = mount(h(SolvePage, { controller, state, onNavigate: () => undefined }));
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("最低置信度");
+    expect(text).toContain("Base URL");
+    expect(text).toContain("测试连接");
+    expect(text).toContain("允许在考试页面自动作答");
+  });
+
+  it("答题页不再出现题库阈值与翻页设置，避免设置重复", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ui.sectionStates = { "solve.solving": true, "solve.ai": true };
+    const state = makeState({ settings });
+    const { controller } = makeController(state);
+    const container = mount(h(SolvePage, { controller, state, onNavigate: () => undefined }));
+
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("模糊匹配阈值");
+    expect(text).not.toContain("启用自动翻页");
+  });
+});
+
+describe("题库页就近设置", () => {
+  it("题库设置默认收起，包含阈值/缓存/远程入口", () => {
+    const state = makeState();
+    const { controller, saveSettings } = makeController(state);
+    const container = mount(h(BankPage, { controller, state, onNavigate: () => undefined }));
+
+    expect(sectionIds(container)).toEqual(["bank.settings"]);
+    expect(expanded(container, "bank.settings")).toBe("false");
+    expect(container.textContent).toContain("题库设置");
+
+    container
+      .querySelector<HTMLElement>('[data-section="bank.settings"] .sh-collapse-toggle')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { "bank.settings": true } } });
+  });
+
+  it("展开后可直接配置模糊阈值、缓存天数与远程题库", () => {
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.ui.sectionStates = { "bank.settings": true };
+    const state = makeState({ settings });
+    const { controller } = makeController(state);
+    const container = mount(h(BankPage, { controller, state, onNavigate: () => undefined }));
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("模糊匹配阈值");
+    expect(text).toContain("缓存保留天数");
+    expect(text).toContain("启用远程题库");
+    expect(text).not.toContain("可在设置中配置远程搜题接口");
+  });
+});
+
+describe("设置页只保留全局项", () => {
+  it("渲染 4 个全局板块，默认只展开外观", () => {
     const state = makeState();
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
-    const sections = container.querySelectorAll("[data-section]");
-    expect(sections).toHaveLength(7);
-
-    const expanded = (id: string) =>
-      container
-        .querySelector(`[data-section="${id}"] .sh-collapse-toggle`)
-        ?.getAttribute("aria-expanded");
-    expect(expanded("solving")).toBe("true");
-    expect(expanded("ai")).toBe("true");
-    expect(expanded("autoTurn")).toBe("false");
-    expect(expanded("logs")).toBe("false");
+    expect(sectionIds(container)).toEqual([
+      "settings.appearance",
+      "settings.advanced",
+      "settings.data",
+      "settings.logs",
+    ]);
+    expect(expanded(container, "settings.appearance")).toBe("true");
+    expect(expanded(container, "settings.advanced")).toBe("false");
+    expect(expanded(container, "settings.data")).toBe("false");
+    expect(expanded(container, "settings.logs")).toBe("false");
   });
 
-  it("题库与缓存合并进答题板块", () => {
+  it("答题/AI/自动翻页/题库设置不再出现在设置页", () => {
+    const state = makeState();
+    const { controller } = makeController(state);
+    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
+
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("最低置信度");
+    expect(text).not.toContain("启用自动翻页");
+    expect(text).not.toContain("模糊匹配阈值");
+    expect(text).not.toContain("Base URL");
+    expect(text).toContain("外观与快捷键");
+    expect(text).toContain("运行日志");
+  });
+
+  it("旧 sectionStates key 不会打开新板块", () => {
     const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.ui.sectionStates = { autoTurn: true };
+    settings.ui.sectionStates = { solving: true, ai: true, autoTurn: true, bank: true, media: true };
     const state = makeState({ settings });
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
-    const answerSection = container.querySelector('[data-section="solving"]');
-    expect(answerSection).not.toBeNull();
-    expect(answerSection?.textContent).toContain("题库与缓存");
-    expect(answerSection?.textContent).toContain("模糊匹配阈值");
-    expect(answerSection?.textContent).toContain("缓存保留天数");
-
-    const autoTurnSection = container.querySelector('[data-section="autoTurn"]');
-    expect(autoTurnSection).not.toBeNull();
-    expect(autoTurnSection?.textContent).toContain("媒体播放");
+    expect(sectionIds(container)).toHaveLength(4);
+    expect(expanded(container, "settings.appearance")).toBe("true");
+    expect(expanded(container, "settings.advanced")).toBe("false");
   });
 
-  it("旧 bank/media 折叠状态不会破坏 7 板块渲染", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.ui.sectionStates = { bank: true, media: true };
-    const state = makeState({ settings });
-    const { controller } = makeController(state);
-    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
-
-    expect(container.querySelectorAll("[data-section]")).toHaveLength(7);
-    const expanded = (id: string) =>
-      container
-        .querySelector(`[data-section="${id}"] .sh-collapse-toggle`)
-        ?.getAttribute("aria-expanded");
-    expect(expanded("solving")).toBe("true");
-    expect(expanded("autoTurn")).toBe("false");
-  });
-
-  it("点击板块标题写入对应的展开状态", () => {
+  it("点击板块标题写入对应的新 key", () => {
     const state = makeState();
     const { controller, saveSettings } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
-    const toggle = container.querySelector<HTMLElement>(
-      '[data-section="logs"] .sh-collapse-toggle',
-    );
-    expect(toggle).not.toBeNull();
-    toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    container
+      .querySelector<HTMLElement>('[data-section="settings.logs"] .sh-collapse-toggle')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-    expect(saveSettings).toHaveBeenCalledWith({ ui: { sectionStates: { logs: true } } });
+    expect(saveSettings).toHaveBeenCalledWith({
+      ui: { sectionStates: { "settings.logs": true } },
+    });
   });
 
-  it("全部展开会写入全部 7 个板块状态", () => {
+  it("全部展开只写入设置页的 4 个板块", () => {
     const state = makeState();
     const { controller, saveSettings } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
-    const expandAll = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "全部展开",
-    );
-    expect(expandAll).toBeDefined();
-    expandAll?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    findButton(container, "全部展开")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     const patch = saveSettings.mock.calls.at(-1)?.[0] as {
       ui: { sectionStates: Record<string, boolean> };
     };
     expect(Object.keys(patch.ui.sectionStates)).toEqual([
-      "solving",
-      "ai",
-      "autoTurn",
-      "advanced",
-      "appearance",
-      "data",
-      "logs",
+      "settings.appearance",
+      "settings.advanced",
+      "settings.data",
+      "settings.logs",
     ]);
     expect(Object.values(patch.ui.sectionStates).every(Boolean)).toBe(true);
   });
 
-  it("自动翻页板块合并媒体播放且不再包含延迟与步数输入", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.ui.sectionStates = { autoTurn: true };
-    const state = makeState({ settings });
-    const { controller } = makeController(state);
-    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
-
-    const text = container.textContent ?? "";
-    expect(text).toContain("启用自动翻页");
-    expect(text).toContain("媒体播放");
-    expect(text).toContain("默认静音");
-    expect(text).toContain("自动翻页时暂停后恢复");
-    for (const removed of ["开始前延迟", "无音视频时等待", "最小延迟", "最大延迟", "最大步数"]) {
-      expect(text).not.toContain(removed);
-    }
-  });
-
-  it("媒体播放不再提供默认倍速", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.ui.sectionStates = { autoTurn: true };
-    const state = makeState({ settings });
-    const { controller } = makeController(state);
-    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
-
-    const text = container.textContent ?? "";
-    expect(text).not.toContain("默认倍速");
-    expect(text).not.toContain("倍速在主页");
-    expect(text).toContain("默认静音");
-  });
-
   it("日志内嵌在设置中：展开后显示筛选、导出与清空确认", async () => {
     const settings = structuredClone(DEFAULT_SETTINGS);
-    settings.ui.sectionStates = { logs: true };
+    settings.ui.sectionStates = { "settings.logs": true };
     const state = makeState({
       settings,
       logs: [
@@ -302,9 +371,7 @@ describe("设置页折叠板块", () => {
     expect(container.textContent).toContain("导出");
     expect(container.textContent).toContain("全部");
 
-    const clear = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "清空",
-    );
+    const clear = findButton(container, "清空");
     expect(clear).toBeDefined();
     clear?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));

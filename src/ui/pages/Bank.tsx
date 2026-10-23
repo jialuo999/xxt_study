@@ -3,8 +3,8 @@ import {
   Badge,
   Button,
   Card,
+  CollapsibleCard,
   EmptyState,
-  Field,
   Icon,
   Modal,
   Spinner,
@@ -14,9 +14,11 @@ import { QUESTION_TYPE_LABEL } from "@/core/settings";
 import { formatAnswer } from "@/utils/text";
 import type { BankEntry } from "@/core/types";
 import { downloadText, formatDateTime } from "@/ui/tabs";
+import { BankPanel } from "@/ui/panels/BankPanel";
+import { SECTION_KEYS, isSectionOpen, toggleSection } from "@/ui/sections";
 import type { PageProps } from "./shared";
 
-export function BankPage({ controller, state, onNavigate }: PageProps) {
+export function BankPage({ controller, state }: PageProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -70,10 +72,7 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
     }
   };
 
-  const openRemoteSettings = () => {
-    controller.saveSettings({ ui: { sectionStates: { solving: true } } });
-    onNavigate("settings");
-  };
+  const sectionStates = state.settings.ui.sectionStates ?? {};
 
   return (
     <div class="sh-stack">
@@ -164,15 +163,7 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
         </div>
       </Card>
 
-      <Card
-        title="检索"
-        hint="按题干文本模糊搜索本地题库"
-        action={
-          <Button size="sm" variant="ghost" onClick={openRemoteSettings}>
-            远程题库
-          </Button>
-        }
-      >
+      <Card title="检索" hint="按题干文本模糊搜索本地题库">
         <div class="sh-searchbar">
           <TextInput
             placeholder="输入题干关键词…"
@@ -214,18 +205,23 @@ export function BankPage({ controller, state, onNavigate }: PageProps) {
         ) : null}
       </Card>
 
-      <Card title="远程题库" hint={state.settings.bank.remote.enabled ? "已启用通用 HTTP 接口" : "未启用"}>
-        <div class="sh-row sh-row--between">
-          <div class="sh-hint">
-            {state.settings.bank.remote.enabled
-              ? state.settings.bank.remote.url || "未填写 URL"
-              : "可在设置中配置远程搜题接口（可选）"}
-          </div>
+      <CollapsibleCard
+        id={SECTION_KEYS.bankSettings}
+        title="题库设置"
+        hint="匹配阈值、缓存与远程接口"
+        summary={`阈值 ${state.settings.bank.fuzzyThreshold.toFixed(2)} · 缓存 ${
+          state.settings.bank.cacheTtlDays
+        } 天 · 远程${state.settings.bank.remote.enabled ? "已启用" : "关闭"}`}
+        open={isSectionOpen(sectionStates, SECTION_KEYS.bankSettings)}
+        onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.bankSettings)}
+        action={
           <Badge tone={state.settings.bank.remote.enabled ? "info" : "muted"}>
-            {state.settings.bank.remote.enabled ? "HTTP" : "关闭"}
+            {state.settings.bank.remote.enabled ? "HTTP" : "本地"}
           </Badge>
-        </div>
-      </Card>
+        }
+      >
+        <BankPanel controller={controller} state={state} />
+      </CollapsibleCard>
 
       <Modal
         open={confirmClear}
