@@ -80,15 +80,22 @@
 - 诊断包额外脱敏 `ai.baseUrl` 的 query/hash、`bank.remote.bodyTemplate`；frame title 也走 `redact`；
 - 跨 frame 文本上限从 4000 放宽到 20000，避免长题干导致整条 `QUESTIONS` 被拒绝。
 
-## 8. 媒体偏好性能
+## 8. 媒体偏好性能与播放器事件
 
 - `syncTimer` 在 1x 时从每 1.5 秒全文档 + Shadow 扫描降为每 6 秒一次；
-- 非 1x 时仍每 1.5 秒补回倍速。
+- 非 1x 时仍每 1.5 秒补回倍速；
+- 播放守卫为 Shadow DOM 内的媒体补挂 `pause/play/ended` 监听（这些事件不会 composed 冒泡到 document），并用 `composedPath`、宿主 `shadowRoot` 与系统媒体键识别人工暂停；
+- 守卫启动前已暂停且有播放进度的媒体视为用户暂停，先尊重 30 秒。
 
-## 9. 验证
+## 9. 提交结果 URL
 
-- 新增/更新：任务点兜底顺序、restore 返回 false、手动填写二次确认、复核模式 autoConfirm=false、长题干、诊断 baseUrl/模板脱敏；
+- 结果页判定只看 `pathname`，避免把 `?success=0` 等失败 query 当成成功；
+- 补充 `/work/selectWorkQuestion` 结果路由。
+
+## 10. 验证
+
+- 新增/更新：任务点兜底顺序、restore 返回 false、锁释放、目标 frame 守卫消息顺序、手动填写二次确认、复核模式 autoConfirm=false、长题干、诊断 baseUrl/模板脱敏、Shadow DOM 媒体、系统媒体键、启动前暂停；
 - `npm run typecheck` 通过；
-- `npm test`：28 文件 / 335 条通过；
+- `npm test`：28 文件 / 340 条通过；
 - `npm run test:sandbox` 通过；
 - `npm run build` 通过。

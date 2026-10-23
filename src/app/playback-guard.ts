@@ -104,6 +104,8 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
   const progressTimers = new Map<HTMLMediaElement, ReturnType<typeof setTimeout>>();
   /** 每媒体的人工暂停窗口（Map 而非常量：多播放器互不干扰） */
   const manualPauses = new Map<HTMLMediaElement, number>();
+  const observedMedia = new WeakSet<HTMLMediaElement>();
+  const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
 
   let stopped = false;
   let suspended = false;
@@ -135,6 +137,19 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
       return [];
     }
   };
+
+  // 守卫启动前就已暂停且已有进度的媒体，通常是用户自己暂停的；
+  // 先按人工暂停处理，避免“一开自动翻页就把用户暂停的视频抢走”。
+  // 暂停在 0 秒的预加载媒体不在此列，仍由任务点顺序逻辑正常开始播放。
+  for (const media of collect()) {
+    try {
+      if (media.paused && !media.ended && media.currentTime > 0) {
+        manualPauses.set(media, now() + MANUAL_PAUSE_MS);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   const manualPauseActive = (media: HTMLMediaElement): boolean => {
     const until = manualPauses.get(media);
@@ -301,6 +316,13 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
     const body = doc.body;
     const root = doc.documentElement;
     for (const media of collect()) {
+      // 控件在 Shadow DOM 时事件 target 会被重定向到宿主，直接检查宿主
+      try {
+        const mediaRoot = media.getRootNode() as { host?: Element } | null;
+        if (mediaRoot && "host" in mediaRoot && mediaRoot.host === target) return true;
+      } catch {
+        /* ignore */
+      }
       let wrapper: Element | null = media.parentElement;
       for (let depth = 0; wrapper && depth < 4; depth++) {
         // 到 body/documentElement 就停：否则页面任意点击都会被误判成播放器手势
@@ -322,8 +344,37 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
     } catch {
       /* ignore */
     }
+    // 播放器控件可能位于 open/closed Shadow DOM，事件 target 会被重定向到宿主；
+    // composedPath 能看到真实控件节点，避免把用户在控件上的暂停误判成平台暂停。
+    try {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      for (const node of path) {
+        if (isMediaElement(node)) return true;
+        if (!isElementLike(node)) continue;
+        if (node.tagName === "BODY" || node.tagName === "HTML") break;
+        try {
+          if (
+            node.closest(
+              "video, audio, [class*='player'], .vjs-control-bar, .prism-controls, .vjs-play-control",
+            )
+          ) {
+            return true;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     const target = event.target;
     if (!isElementLike(target)) return false;
+    // 播放器 Shadow DOM 的事件 target 是宿主；宿主内部有 video/audio 即视为播放器区域
+    try {
+      if (target.shadowRoot?.querySelector("video, audio")) return true;
+    } catch {
+      /* ignore */
+    }
     const tagName = target.tagName;
     if (tagName === "BODY" || tagName === "HTML") return false;
     return isInPlayerArea(target);
@@ -331,7 +382,20 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
 
   const onGesture = (event: Event): void => {
     if (stopped) return;
-    if (!isPlayerGesture(event)) return;
+    // 系统媒体键可能以 Body 为 target；这类按键就是明确的播放/暂停意图
+    if (event instanceof KeyboardEvent) {
+      if (
+        event.key === "MediaPlayPause" ||
+        event.key === "MediaPlay" ||
+        event.key === "MediaPause" ||
+        event.key === "MediaStop"
+      ) {
+        lastGestureAt = now();
+        return;
+      }
+    }
+    const playerGesture = isPlayerGesture(event);
+    if (!playerGesture) return;
     lastGestureAt = now();
   };
 
@@ -370,9 +434,34 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
     manualPauses.delete(media);
   };
 
+  /**
+   * Shadow DOM 内的媒体事件不会以 composed 形式冒泡到 document，
+   * 必须在媒体元素本身上补监听，否则“用户点控件暂停”永远只能靠轮询发现。
+   */
+  const observeMedia = (media: HTMLMediaElement): void => {
+    if (observedMedia.has(media)) return;
+    try {
+      if (media.getRootNode() === doc) return;
+    } catch {
+      return;
+    }
+    observedMedia.add(media);
+    const options: AddEventListenerOptions = abortController
+      ? { capture: true, signal: abortController.signal }
+      : { capture: true };
+    try {
+      media.addEventListener("pause", onPause, options);
+      media.addEventListener("play", onPlay, options);
+      media.addEventListener("ended", onEnded, options);
+    } catch {
+      /* ignore */
+    }
+  };
+
   const sweep = (): void => {
     if (!enabled() || suspended) return;
     for (const media of collect()) {
+      observeMedia(media);
       if (pendingResumes.has(media)) continue;
       if (manualPauseActive(media)) continue;
       try {
@@ -408,6 +497,7 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
     cancelAllProgressChecks();
     failureStates.clear();
     manualPauses.clear();
+    abortController?.abort();
     doc.removeEventListener("pause", onPause, true);
     doc.removeEventListener("play", onPlay, true);
     doc.removeEventListener("ended", onEnded, true);
@@ -435,6 +525,7 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
   doc.addEventListener("pointerdown", onGesture, true);
   doc.addEventListener("keydown", onGesture, true);
   doc.addEventListener("visibilitychange", onVisibilityChange);
+  for (const media of collect()) observeMedia(media);
   pollTimer = setInterval(sweep, POLL_INTERVAL_MS);
 
   return {

@@ -295,6 +295,49 @@ describe("playback-guard", () => {
     expect(guard.getStats().resumes).toBe(1);
   });
 
+  it("Shadow DOM 播放器控件上的暂停也按人工暂停处理", async () => {
+    const host = document.createElement("div");
+    const shadow = host.attachShadow({ mode: "open" });
+    const player = document.createElement("div");
+    player.className = "video-player";
+    const media = mockVideo({ paused: false });
+    player.appendChild(media.video);
+    shadow.appendChild(player);
+    document.body.appendChild(host);
+
+    const guard = startGuard();
+    // 真实浏览器里 Shadow DOM 控件事件会重定向到宿主；这里直接以宿主为目标
+    host.dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }));
+    dispatchPause(media);
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(media.playMock).not.toHaveBeenCalled();
+    expect(guard.getStats().resumes).toBe(0);
+  });
+
+  it("系统媒体键暂停不被守卫抢回", async () => {
+    const media = mockVideo({ paused: false });
+    const guard = startGuard();
+
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "MediaPlayPause", bubbles: true }),
+    );
+    dispatchPause(media);
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(media.playMock).not.toHaveBeenCalled();
+    expect(guard.getStats().resumes).toBe(0);
+  });
+
+  it("守卫启动前已暂停且有进度的媒体先按人工暂停处理", async () => {
+    const media = mockVideo({ paused: true, initialTime: 12 });
+    const guard = startGuard();
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(media.playMock).not.toHaveBeenCalled();
+    expect(guard.getStats().resumes).toBe(0);
+  });
+
   it("stop() 清理监听与定时器，可重复调用", async () => {
     const media = mockVideo();
     const guard = startGuard();

@@ -452,9 +452,9 @@ async function applyText(
 const AUTH_URL_PATTERN =
   /(?:^|[/._-])(?:passport|login|logon|sso|cas|captcha|verify)(?:[/._-]|$)/i;
 
-/** 结果页 URL 特征：命中才把“URL 变化”视为提交成功 */
+/** 结果页 URL 特征：只看 pathname，query 里的 success=0 之类不能当成成功信号 */
 const RESULT_URL_PATTERN =
-  /(?:^|[/?#=&._-])(?:result|results|score|scores|finish|finished|complete|completed|success|submitted)(?:[/?#=&._-]|$)|\/work\/(?:selectWorkQuestionYiPiYue|dowork\/result)|\/exam-ans\/exam\/(?:test\/)?(?:reVersionPaperMarkContentNew|result)/i;
+  /(?:^|[/._-])(?:result|results|score|scores|finish|finished|complete|completed|success|submitted)(?:[/._-]|$)|\/work\/(?:selectWorkQuestionYiPiYue|selectWorkQuestion|dowork\/result)|\/exam-ans\/exam\/(?:test\/)?(?:reVersionPaperMarkContentNew|result)/i;
 
 /** 提交后结果文本关键字（与学习通侧措辞保持一致，供通用平台复用） */
 const RESULT_TEXT_KEYWORDS = ["提交成功", "交卷成功", "成绩", "已完成", "已提交"] as const;
@@ -496,7 +496,7 @@ function isResultPageUrl(url: string): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    return RESULT_URL_PATTERN.test(`${parsed.pathname}${parsed.search}`);
+    return RESULT_URL_PATTERN.test(parsed.pathname);
   } catch {
     return RESULT_URL_PATTERN.test(url);
   }

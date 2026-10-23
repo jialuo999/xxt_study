@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Question } from "../../src/core/types";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import { replaceSettings, updateSettings } from "../../src/core/settings-store";
+import { lockKeyFromUrl, readLock } from "../../src/app/tab-lock";
 
 const fixture = vi.hoisted(() => {
   const question: Question = {
@@ -207,6 +208,75 @@ describe("HostController 集成", () => {
 
     await controller.refresh();
     expect(controller.state.filledQuestionIds).toEqual([]);
+    controller.dispose();
+  });
+
+  it("恢复会话失败时释放多标签锁，不阻塞其他标签页", async () => {
+    updateSettings({ autoTurn: { enabled: true, resumeOnReload: true } });
+    (fixture.adapter as { detectPage: () => unknown }).detectPage = () => ({
+      kind: "chapter" as const,
+      url: location.href,
+      title: document.title,
+      supported: true,
+    });
+    sessionStorage.setItem(
+      "study-helper.autoturn.v1",
+      JSON.stringify({
+        running: true,
+        steps: 1,
+        visited: [],
+        lastUrl: "https://mooc1.chaoxing.com/mycourse/studentstudy?chapterId=old",
+        savedAt: Date.now(),
+      }),
+    );
+
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    await controller.init();
+
+    expect(readLock(lockKeyFromUrl(location.href))).toBeNull();
+    controller.dispose();
+  });
+
+  it("切换播放目标时只给新目标启动守卫，旧目标先停守卫再暂停", async () => {
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    const sentA: string[] = [];
+    const sentB: string[] = [];
+    const fake = (sent: string[]) =>
+      ({
+        closed: false,
+        postMessage: (message: { t?: string }) => sent.push(message.t ?? ""),
+      }) as unknown as Window;
+
+    (controller as unknown as { children: Map<string, unknown> }).children.set("a", {
+      frameId: "a",
+      source: fake(sentA),
+      token: "ta",
+      nonce: "",
+      url: "https://x/video?jobid=1",
+      title: "",
+      pageKind: "video",
+      questions: [],
+      lastSeen: Date.now(),
+    });
+    (controller as unknown as { children: Map<string, unknown> }).children.set("b", {
+      frameId: "b",
+      source: fake(sentB),
+      token: "tb",
+      nonce: "",
+      url: "https://x/video?jobid=2",
+      title: "",
+      pageKind: "video",
+      questions: [],
+      lastSeen: Date.now(),
+    });
+    (controller as unknown as { autoTurn: { running: boolean } }).autoTurn.running = true;
+    (controller as unknown as { activeMediaFrameId: string }).activeMediaFrameId = "a";
+    (controller as unknown as { activateMediaFrame: (id: string) => void }).activateMediaFrame("b");
+
+    expect(sentA).toEqual(["GUARD_STOP", "PAUSE_MEDIA"]);
+    expect(sentB).toEqual(["GUARD_START", "RESUME_MEDIA"]);
     controller.dispose();
   });
 });

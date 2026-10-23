@@ -32,10 +32,10 @@ const AUTH_URL_PATTERN =
 
 /**
  * 结果页 URL 特征：命中才把“URL 变化”视为提交成功。
- * 只认明显的结果路由，避免把同一作答页（如 /work/doHomeWorkNew）的参数变化当成成功。
+ * 只看 pathname：query 里的 success=0 之类不能当成成功信号。
  */
 const RESULT_URL_PATTERN =
-  /(?:^|[/?#=&._-])(?:result|results|score|scores|finish|finished|complete|completed|success|submitted)(?:[/?#=&._-]|$)|\/work\/(?:selectWorkQuestionYiPiYue|dowork\/result)|\/exam-ans\/exam\/(?:test\/)?(?:reVersionPaperMarkContentNew|result)/i;
+  /(?:^|[/._-])(?:result|results|score|scores|finish|finished|complete|completed|success|submitted)(?:[/._-]|$)|\/work\/(?:selectWorkQuestionYiPiYue|selectWorkQuestion|dowork\/result)|\/exam-ans\/exam\/(?:test\/)?(?:reVersionPaperMarkContentNew|result)/i;
 
 /** 已经提交过的 document；避免 watch/自动流程在一次页面上重复交卷 */
 const submittedDocuments = new WeakSet<Document>();
@@ -105,7 +105,7 @@ function isResultPageUrl(url: string): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    return RESULT_URL_PATTERN.test(`${parsed.pathname}${parsed.search}`);
+    return RESULT_URL_PATTERN.test(parsed.pathname);
   } catch {
     return RESULT_URL_PATTERN.test(url);
   }
