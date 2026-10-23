@@ -62,17 +62,18 @@ export function pickPrimaryMedia(media: HTMLMediaElement[]): HTMLMediaElement | 
     let score = 0;
     try {
       const rect = element.getBoundingClientRect();
-      score += Math.max(0, rect.width) * Math.max(0, rect.height);
+      // 可见面积优先，避免隐藏的广告/背景音抢走“主播放器”
+      score += Math.max(0, rect.width) * Math.max(0, rect.height) * 1000;
     } catch {
       /* ignore */
     }
     try {
-      if (!element.paused && !element.ended) score += 1e9;
+      if (!element.paused && !element.ended) score += 1_000_000;
     } catch {
       /* ignore */
     }
     try {
-      if (element.currentTime > 0) score += 1e6;
+      if (element.currentTime > 0) score += 1000;
     } catch {
       /* ignore */
     }
