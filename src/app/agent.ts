@@ -8,6 +8,7 @@ import {
 import { getSettings } from "@/core/settings-store";
 import { logger } from "@/core/logger";
 import { getAdapter } from "@/platform/registry";
+import { primeFontDecoder } from "@/platform/chaoxing/font/decoder";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { frameId as getFrameId } from "./frames";
 import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
@@ -61,6 +62,12 @@ export class FrameAgent {
       this.sendHello();
     }, 1500);
     setTimeout(() => this.collectAndSend(true), 600);
+    // 字体样式可能稍后才注入；解析成功后重新采集一次，避免第一批题目带乱码
+    void primeFontDecoder(document).then((font) => {
+      if (font && !this.disposed) {
+        setTimeout(() => this.collectAndSend(true), 0);
+      }
+    });
     this.observe();
     this.startMediaReporter();
   }
