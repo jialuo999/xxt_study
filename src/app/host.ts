@@ -185,7 +185,6 @@ export class HostController implements UiController {
       pauseMedia: () => this.pauseMedia(),
       getTaskSignature: () => this.getTaskSignature(),
       hasVerificationChallenge: () => this.state.verification.detected,
-      onStarted: () => this.startPlaybackGuard(),
       onState: (autoTurn) => this.patch({ autoTurn }),
       onStopped: (reason) => {
         this.stopPlaybackGuard();
@@ -1172,8 +1171,7 @@ export class HostController implements UiController {
       } else {
         const previous = this.children.get(this.activeMediaFrameId);
         if (previous) {
-          // 先停守卫再暂停，避免旧 frame 的守卫把刚暂停的视频又恢复
-          sendToWindow(previous.source, createMessage({ t: "GUARD_STOP", token: previous.token }));
+          // 旧目标暂停；守卫未接入主流程，这里只需要停媒体
           sendToWindow(previous.source, createMessage({ t: "PAUSE_MEDIA", token: previous.token }));
         }
       }
@@ -1181,9 +1179,8 @@ export class HostController implements UiController {
     }
 
     // 守卫只跟随当前播放目标启动，避免所有子 frame 一起自动恢复暂停的视频。
-    if (this.autoTurn.isRunning) {
-      sendToWindow(target.source, createMessage({ t: "GUARD_START", token: target.token }));
-    }
+    // 注意：0.2.0 的播放守卫目前不接入自动翻页主流程（见 review-hardening-fixes），
+    // 避免与播放器自身的暂停策略互相拉扯导致抖动；保留消息与模块供后续实机验证。
     sendToWindow(target.source, createMessage({ t: "RESUME_MEDIA", token: target.token }));
   }
 

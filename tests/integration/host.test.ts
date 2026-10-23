@@ -238,7 +238,7 @@ describe("HostController 集成", () => {
     controller.dispose();
   });
 
-  it("切换播放目标时只给新目标启动守卫，旧目标先停守卫再暂停", async () => {
+  it("切换播放目标时暂停旧目标、恢复新目标，不启动播放守卫", async () => {
     const { HostController } = await import("../../src/app/host");
     const controller = new HostController();
     const sentA: string[] = [];
@@ -275,8 +275,8 @@ describe("HostController 集成", () => {
     (controller as unknown as { activeMediaFrameId: string }).activeMediaFrameId = "a";
     (controller as unknown as { activateMediaFrame: (id: string) => void }).activateMediaFrame("b");
 
-    expect(sentA).toEqual(["GUARD_STOP", "PAUSE_MEDIA"]);
-    expect(sentB).toEqual(["GUARD_START", "RESUME_MEDIA"]);
+    expect(sentA).toEqual(["PAUSE_MEDIA"]);
+    expect(sentB).toEqual(["RESUME_MEDIA"]);
     controller.dispose();
   });
 });

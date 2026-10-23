@@ -15,9 +15,8 @@
 
 修复后：
 
-- `startPlaybackGuard()` 只启动顶层守卫，不再广播；
-- 只有 `activateMediaFrame(frameId)` 选中的目标 frame 才收到 `GUARD_START`；
-- 切换目标时先向旧目标发 `GUARD_STOP`，再发 `PAUSE_MEDIA`；新目标先 `GUARD_START` 再 `RESUME_MEDIA`；
+- 0.2.0 的播放守卫暂不接入自动翻页主流程（保留模块/消息/单测，待真实页面验证后再启用），避免与播放器自身的暂停策略互相拉扯造成抖动；
+- `activateMediaFrame()` 只暂停旧目标、恢复新目标，不再发送守卫消息；
 - `HELLO` 不再给新 frame 启动守卫，避免预加载视频被自动播放。
 
 ## 2. 提交门槛与手动填写
@@ -92,7 +91,8 @@
 - `waitForTaskMedia` 不再每 500ms 无条件 `activateMediaFrame`：只在目标切换时激活；
 - 目标暂停时最多每 5 秒重试一次 `RESUME`，不再高频 `play()`；
 - `waitForExternalMedia` 的 `resumeChildMedia()` 从每 500ms 降到最多每 3 秒一次；
-- 移除所有 `video.click()` 兜底（`media-wait` / `agent` / `playback-guard`）：点击 video 会切换播放/暂停，连续重试就是抖动的直接来源；现在只做 focus + `play()`，失败后交给 blocked/手动提示。
+- 移除所有 `video.click()` 兜底（`media-wait` / `agent` / `playback-guard`）：点击 video 会切换播放/暂停，连续重试就是抖动的直接来源；现在只做 focus + `play()`，失败后交给 blocked/手动提示；
+- 0.2.0 播放守卫不接入主流程，避免 1.2s 一次的自动恢复与平台暂停策略互相拉扯。
 
 ## 10. 提交结果 URL
 
