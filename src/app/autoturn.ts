@@ -47,6 +47,8 @@ export interface MediaPlaybackTarget {
   taskTotal: number;
   state: MediaState | null;
   allTasksFinished: boolean;
+  /** tasks：按任务点 DOM 顺序；frames：任务点信息不足时按子 frame 连接顺序兜底 */
+  source?: "tasks" | "frames";
 }
 
 export class AutoTurnRunner {
@@ -155,16 +157,24 @@ export class AutoTurnRunner {
         target = await this.discoverMediaPlaybackTarget(2000, isAlive);
       }
       if (target) {
+        logger.debug("autoturn", "媒体播放目标", {
+          source: target.source,
+          frameId: target.frameId,
+          taskIndex: target.taskIndex,
+          taskTotal: target.taskTotal,
+          allTasksFinished: target.allTasksFinished,
+        });
         if (target.allTasksFinished) {
           mediaHandled = true;
           this.emit("当前任务点均已完成，跳过等待", false);
           logger.info("autoturn", "当前章节任务点均已完成，跳过媒体等待");
         } else {
+          const kind = target.source === "frames" ? "视频" : "任务点";
           const label = target.taskTotal
-            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个任务点`
-            : `第 ${target.taskIndex + 1} 个任务点`;
+            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kind}`
+            : `第 ${target.taskIndex + 1} 个${kind}`;
           this.emit(`按顺序播放${label}`, false);
-          logger.info("autoturn", `按任务点顺序等待${label}`, { frameId: target.frameId });
+          logger.info("autoturn", `按任务点顺序等待${label}`, { frameId: target.frameId, mode: target.source });
           const taskResult = await this.waitForTaskMedia(isAlive);
           if (!this.running || token !== this.loopToken) return;
           if (taskResult === "timeout") {
@@ -436,17 +446,19 @@ export class AutoTurnRunner {
       endedSince = 0;
 
       const frameChanged = target.frameId !== lastFrameId;
-      if (frameChanged || Date.now() - lastActivate > 4000) {
-        lastFrameId = target.frameId;
-        lastActivate = Date.now();
-        this.host.activateMediaFrame(target.frameId);
-        if (frameChanged) {
-          const label = target.taskTotal
-            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个任务点`
-            : `第 ${target.taskIndex + 1} 个任务点`;
-          this.emit(`开始播放${label}`, false);
-          logger.info("autoturn", `开始播放${label}`, { frameId: target.frameId });
-        }
+      lastFrameId = target.frameId;
+      lastActivate = Date.now();
+      this.host.activateMediaFrame(target.frameId);
+      if (frameChanged) {
+        const kind = target.source === "frames" ? "视频" : "任务点";
+        const label = target.taskTotal
+          ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kind}`
+          : `第 ${target.taskIndex + 1} 个${kind}`;
+        this.emit(`开始播放${label}`, false);
+        logger.info("autoturn", `开始播放${label}`, {
+          frameId: target.frameId,
+          mode: target.source ?? "tasks",
+        });
       }
 
       if (settings.video.resumeOnPause && state?.anyPaused) {

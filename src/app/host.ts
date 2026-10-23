@@ -147,6 +147,7 @@ export class HostController implements UiController {
   private toastSeq = 0;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshSeq = 0;
+  private activeMediaFrameId = "";
   private disposers: Array<() => void> = [];
 
   constructor() {
@@ -796,6 +797,10 @@ export class HostController implements UiController {
           lastSeen: Date.now(),
         });
         sendToWindow(source, createMessage({ t: "WELCOME", token }));
+        // 已有正在播放的目标时，新加载的预加载 frame 默认暂停，避免多个视频同时出声
+        if (this.activeMediaFrameId && this.activeMediaFrameId !== message.frameId) {
+          sendToWindow(source, createMessage({ t: "PAUSE_MEDIA", token }));
+        }
         sendToWindow(source, createMessage({ t: "COLLECT", token }));
         logger.debug("frame", `连接子 frame ${message.frameId}（${message.pageKind}）`);
         this.rebuildQuestions();
@@ -956,44 +961,108 @@ export class HostController implements UiController {
           item.state.allTasksFinished !== undefined,
       )
       .sort((a, b) => b[1].at - a[1].at)[0];
-    if (!taskEntry) return null;
 
-    const state = taskEntry[1].state;
-    if (state.allTasksFinished) {
+    if (taskEntry) {
+      const state = taskEntry[1].state;
+      if (state.allTasksFinished) {
+        return {
+          frameId: null,
+          taskUrl: "",
+          taskIndex: -1,
+          taskTotal: state.taskTotal ?? 0,
+          state: null,
+          allTasksFinished: true,
+          source: "tasks",
+        };
+      }
+      const taskUrl = state.nextTaskUrl;
+      if (taskUrl) {
+        const child = this.findChildForTask(taskUrl);
+        if (child) {
+          return {
+            frameId: child.frameId,
+            taskUrl,
+            taskIndex: state.nextTaskIndex ?? 0,
+            taskTotal: state.taskTotal ?? 0,
+            state: this.childMedia.get(child.frameId)?.state ?? null,
+            allTasksFinished: false,
+            source: "tasks",
+          };
+        }
+      }
+    }
+
+    // 任务点标记缺失/iframe 未匹配时，回退为“按子 frame 连接顺序逐个播放”，
+    // 保证同页多个播放器不会同时被恢复。
+    return this.fallbackMediaTarget();
+  }
+
+  /** 任务点信息不足时，按子 frame 顺序逐个激活，避免所有视频一起播放 */
+  private fallbackMediaTarget(): MediaPlaybackTarget | null {
+    const frames = [...this.children.values()]
+      .filter((child) => {
+        const entry = this.childMedia.get(child.frameId);
+        if (!entry || Date.now() - entry.at >= 3500) return false;
+        if (!entry.state.hasMedia) return false;
+        try {
+          return !child.source.closed;
+        } catch {
+          return false;
+        }
+      })
+      .map((child) => ({ child, state: this.childMedia.get(child.frameId)!.state }));
+    if (frames.length === 0) return null;
+
+    const pending = frames.filter(
+      ({ state }) => !state.allEnded && !state.currentTaskFinished,
+    );
+    if (pending.length === 0) {
       return {
         frameId: null,
         taskUrl: "",
         taskIndex: -1,
-        taskTotal: state.taskTotal ?? 0,
+        taskTotal: frames.length,
         state: null,
         allTasksFinished: true,
+        source: "frames",
       };
     }
-    const taskUrl = state.nextTaskUrl;
-    if (!taskUrl) return null;
-
-    const child = this.findChildForTask(taskUrl);
+    const first = pending[0];
     return {
-      frameId: child?.frameId ?? null,
-      taskUrl,
-      taskIndex: state.nextTaskIndex ?? 0,
-      taskTotal: state.taskTotal ?? 0,
-      state: child ? (this.childMedia.get(child.frameId)?.state ?? null) : null,
+      frameId: first.child.frameId,
+      taskUrl: first.child.url,
+      taskIndex: frames.indexOf(first),
+      taskTotal: frames.length,
+      state: first.state,
       allTasksFinished: false,
+      source: "frames",
     };
   }
 
-  /** 只恢复指定子 frame 的媒体，并暂停其他子 frame，保证一次只播一个任务点 */
+  /**
+   * 只恢复指定子 frame 的媒体；目标切换时只暂停上一个目标，
+   * 不再每轮向所有 frame 发 PAUSE，避免视频被反复暂停/恢复导致抖动。
+   */
   activateMediaFrame(frameId: string): void {
-    for (const child of this.children.values()) {
-      sendToWindow(
-        child.source,
-        createMessage({
-          t: child.frameId === frameId ? "RESUME_MEDIA" : "PAUSE_MEDIA",
-          token: child.token,
-        }),
-      );
+    const target = this.children.get(frameId);
+    if (!target) return;
+
+    if (this.activeMediaFrameId !== frameId) {
+      if (!this.activeMediaFrameId) {
+        // 首次激活：暂停其他已连接 frame，避免平台自动播放多个视频
+        for (const child of this.children.values()) {
+          if (child.frameId === frameId) continue;
+          sendToWindow(child.source, createMessage({ t: "PAUSE_MEDIA", token: child.token }));
+        }
+      } else {
+        const previous = this.children.get(this.activeMediaFrameId);
+        if (previous) {
+          sendToWindow(previous.source, createMessage({ t: "PAUSE_MEDIA", token: previous.token }));
+        }
+      }
+      this.activeMediaFrameId = frameId;
     }
+    sendToWindow(target.source, createMessage({ t: "RESUME_MEDIA", token: target.token }));
   }
 
   private findChildForTask(taskUrl: string): ChildFrame | null {
@@ -1097,6 +1166,7 @@ export class HostController implements UiController {
 
   /** 停止自动翻页时暂停所有视频/音频 */
   pauseMedia(): void {
+    this.activeMediaFrameId = "";
     for (const media of collectMedia(document)) {
       try {
         if (!media.paused) media.pause();
@@ -1144,6 +1214,7 @@ export class HostController implements UiController {
       if (closed || Date.now() - child.lastSeen > 60_000) {
         this.children.delete(frameId);
         this.childMedia.delete(frameId);
+        if (this.activeMediaFrameId === frameId) this.activeMediaFrameId = "";
         changed = true;
       }
     }
