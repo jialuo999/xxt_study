@@ -101,6 +101,26 @@ describe("media-target", () => {
     expect(target?.taskTotal).toBe(2);
   });
 
+  it("任务点信息不足时按 children 顺序兜底，而不是按状态上报顺序", () => {
+    const children = [
+      child("b", "https://x/video?jobid=job-2&knowledgeId=k-1"),
+      child("a", "https://x/video?jobid=job-1&knowledgeId=k-1"),
+    ];
+    // 先上报 a、后上报 b；兜底仍应按 children（页面连接）顺序选 b
+    const childMedia = new Map([
+      ["a", mediaEntry(state({ hasMedia: true }), 2000)],
+      ["b", mediaEntry(state({ hasMedia: true }), 1000)],
+    ]);
+    const target = selectMediaPlaybackTarget({
+      children,
+      childMedia,
+      chapterId: "k-1",
+      now: 2500,
+    });
+    expect(target?.source).toBe("frames");
+    expect(target?.frameId).toBe("b");
+  });
+
   it("summarizeChildMediaState 只汇总当前章节的媒体，旧章节的 allEnded 不生效", () => {
     const children = [
       child("a", "https://x/content?knowledgeId=current"),

@@ -195,7 +195,6 @@ export function startMediaPreferences(): () => void {
   const lastAppliedMuted = new WeakMap<HTMLMediaElement, boolean>();
   let lastVideo = { ...getSettings().video };
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let sawMedia = false;
 
   const muteOnce = (media: HTMLMediaElement, defaultMuted: boolean): void => {
     if (!defaultMuted || mutedByUser.has(media) || media.muted) return;
@@ -222,16 +221,13 @@ export function startMediaPreferences(): () => void {
 
   const applyAll = (): void => {
     const settings = getSettings().video;
-    const media = collectDocumentMedia();
-    if (media.length > 0) sawMedia = true;
-    for (const element of media) applyToMedia(element, settings);
+    for (const element of collectDocumentMedia()) applyToMedia(element, settings);
   };
 
   const applyNew = (): void => {
     const settings = getSettings().video;
     for (const media of collectDocumentMedia()) {
       if (initialized.has(media)) continue;
-      sawMedia = true;
       applyToMedia(media, settings);
     }
   };
@@ -319,18 +315,18 @@ export function startMediaPreferences(): () => void {
   document.addEventListener("ratechange", onRateChange, true);
 
   // 定时同步跨 frame 设置；非 1x 时补回被播放器重置的倍速。
-  // 没有媒体且为 1x 时降到每 4 个周期（约 6s）探测一次，避免无媒体页面的常驻扫描。
+  // 1x 时没有倍速需要补回，降到每 4 个周期（约 6s）做一次轻量发现，
+  // 避免视频页每 1.5s 全文档 + Shadow Root 扫描。
   let syncTick = 0;
   const syncTimer = setInterval(() => {
     refreshSettings();
     const rate = getSettings().video.playbackRate;
     const nonDefaultRate = Math.abs(rate - 1) >= 0.001;
-    if (!sawMedia && !nonDefaultRate) {
+    if (!nonDefaultRate) {
       syncTick += 1;
       if (syncTick % 4 !== 0) return;
     }
     const media = collectDocumentMedia();
-    if (media.length > 0) sawMedia = true;
     if (!nonDefaultRate) return;
     for (const element of media) applyRate(element, rate);
   }, 1500);

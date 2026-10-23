@@ -142,16 +142,19 @@ interface SelectTargetArgs {
 /** 任务点信息不足时，按子 frame 顺序逐个激活，避免所有视频一起播放 */
 function fallbackMediaTarget(args: SelectTargetArgs): MediaPlaybackTarget | null {
   const now = args.now ?? Date.now();
-  const byId = new Map(args.children.map((child) => [child.frameId, child] as const));
-  const frames = [...args.childMedia.entries()]
-    .filter(([frameId, entry]) => {
-      if (now - entry.at >= MEDIA_STATE_FRESH_MS) return false;
-      const child = byId.get(frameId);
-      if (!child) return false;
-      if (!entry.state.hasMedia) return false;
-      return isStateForChapter(entry.state, child.url, args.chapterId ?? "");
-    })
-    .map(([frameId, entry]) => ({ child: byId.get(frameId)!, state: entry.state }));
+  const frames = args.children
+    .map((child) => ({ child, entry: args.childMedia.get(child.frameId) }))
+    .filter(
+      (
+        item,
+      ): item is { child: ChildFrameLike; entry: ChildMediaEntry } => {
+        if (!item.entry) return false;
+        if (now - item.entry.at >= MEDIA_STATE_FRESH_MS) return false;
+        if (!item.entry.state.hasMedia) return false;
+        return isStateForChapter(item.entry.state, item.child.url, args.chapterId ?? "");
+      },
+    )
+    .map(({ child, entry }) => ({ child, state: entry.state }));
   if (frames.length === 0) return null;
 
   const pending = frames.filter(

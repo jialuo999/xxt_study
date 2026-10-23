@@ -70,6 +70,27 @@ describe("messages", () => {
     expect(validateFrameMessage(message)).toBeNull();
   });
 
+  it("接受超过 4000 字的题干，避免长题被整条丢弃", () => {
+    const message = createMessage({
+      t: "QUESTIONS",
+      token: "t",
+      frameId: "f",
+      pageKind: "homework",
+      questions: [
+        {
+          id: "q-long",
+          type: "short",
+          stem: "题".repeat(4500),
+          options: [],
+          hasImage: false,
+          frameId: "f",
+          index: 0,
+        },
+      ],
+    });
+    expect(validateFrameMessage(message)).not.toBeNull();
+  });
+
   it("validateFrameMessage 拒绝未知消息类型", () => {
     expect(
       validateFrameMessage({ sh: "study-helper", v: 1, t: "UNKNOWN", token: "t" }),

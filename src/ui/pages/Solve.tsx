@@ -91,7 +91,7 @@ export function SolvePage({ controller, state }: PageProps) {
           <Button
             size="sm"
             icon="send"
-            disabled={busy || questions.length === 0 || examBlocked || hintMode || filledCount === 0}
+            disabled={busy || questions.length === 0 || examBlocked || hintMode}
             onClick={() => void controller.submit()}
           >
             提交
@@ -100,7 +100,7 @@ export function SolvePage({ controller, state }: PageProps) {
         <div class="sh-hint" style="margin-top:6px">
           {hintMode
             ? "「仅提示」模式不会自动填入或提交"
-            : `已填入 ${filledCount}/${questions.length} 题，提交前请人工复核`}
+            : `已填入 ${filledCount}/${questions.length} 题；手动填写后首次提交会要求二次确认`}
         </div>
       </Card>
 

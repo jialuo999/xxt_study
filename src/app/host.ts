@@ -75,6 +75,12 @@ import { buildDiagnostics, formatDiagnostics } from "./diagnostics";
 
 const NOTICE_KEY = "study-helper.notice.v1";
 
+/**
+ * 子 frame 心跳是 15s；后台标签页会被浏览器节流，sweep 阈值必须留足余量。
+ * 15s 阈值会和心跳同周期竞态，误删健康 frame 后 PING 无法重新建连。
+ */
+const FRAME_STALE_MS = 120_000;
+
 interface ChildFrame {
   frameId: string;
   source: Window;
@@ -222,7 +228,15 @@ export class HostController implements UiController {
       this.autoTurn.hasRestorableSession()
     ) {
       if (this.acquireAutoTurnLock()) {
-        this.autoTurn.restore();
+        let restored = false;
+        try {
+          restored = this.autoTurn.restore();
+        } catch (error) {
+          logger.warn("autoturn", "恢复自动翻页失败", error);
+        }
+        // restore 可能因为页面已变化/会话过期而选择不恢复；此时必须释放锁，
+        // 否则其他标签页会被一个没有真正运行的锁永久挡住。
+        if (!restored) this.releaseAutoTurnLock();
       } else {
         logger.warn("autoturn", "多标签互斥：已取消刷新后自动恢复");
       }
@@ -473,21 +487,28 @@ export class HostController implements UiController {
       this.toast("warn", "还没有采集到题目，无法提交");
       return;
     }
-    if (filled === 0) {
-      this.toast("warn", "还没有任何答案填入页面，请先解题并「全部填入」");
-      return;
-    }
+    // filled 只统计脚本 fillAll 的结果；用户手动填写不会出现在这里，
+    // 因此不能以 filled===0 硬拦截，只做二次确认，避免误提交空白/部分答案。
+    let confirmed = false;
     if (filled < total) {
-      // 二次确认：第一次点击只提示，15 秒内再次点击才继续，避免误提交空白/部分答案。
       const now = Date.now();
       if (now - this.submitConfirmAt > 15000) {
         this.submitConfirmAt = now;
-        this.toast("warn", `还有 ${total - filled} 题未填入，确认要提交请再次点击「提交」`);
+        this.toast(
+          "warn",
+          filled === 0
+            ? "未检测到脚本填入；若已手动填写，请再次点击「提交」确认"
+            : `还有 ${total - filled} 题未填入，确认要提交请再次点击「提交」`,
+        );
         logger.warn("submit", "提交前覆盖不足，等待二次确认", { filled, total });
         return;
       }
+      confirmed = true;
     }
     this.submitConfirmAt = 0;
+    // 复核模式不自动点掉平台原生确认框；只有用户二次确认或全自动且 100% 覆盖时才自动确认。
+    const autoConfirm =
+      confirmed || (settings.solving.mode === "auto" && filled === total);
 
     const unanswered = this.state.questions.filter(
       (question) => !this.state.results[question.id]?.answer,
@@ -509,7 +530,7 @@ export class HostController implements UiController {
           this.toast("warn", "当前页面没有找到提交按钮");
           return;
         }
-        result = await this.adapter.submit(this.context, { autoConfirm: true });
+        result = await this.adapter.submit(this.context, { autoConfirm });
       } else {
         const child = this.children.get(target);
         if (!child) {
@@ -517,7 +538,7 @@ export class HostController implements UiController {
           this.toast("error", "子页面连接已断开");
           return;
         }
-        sendToWindow(child.source, createMessage({ t: "SUBMIT", token: child.token, autoConfirm: true }));
+        sendToWindow(child.source, createMessage({ t: "SUBMIT", token: child.token, autoConfirm }));
         result = await this.waitForSubmit(target, 45000);
       }
     } catch (error) {
@@ -568,7 +589,9 @@ export class HostController implements UiController {
     this.releaseAutoTurnLock();
   }
 
-  private handlePageHide = (): void => {
+  private handlePageHide = (event: PageTransitionEvent): void => {
+    // 进入 bfcache 时页面只是被冻结；dispose 会让用户按“后退”恢复后没有面板/代理。
+    if (event.persisted) return;
     this.releaseAutoTurnLock();
     this.dispose();
   };
@@ -922,6 +945,7 @@ export class HostController implements UiController {
         const existing = this.children.get(message.frameId);
         // 同一 frame 重新加载时复用 token；不同来源冒用 frameId 时重新发 token
         const sameSource = Boolean(existing && existing.source === source);
+        const sameUrl = Boolean(existing && existing.url === message.url);
         const token = sameSource ? existing!.token : createToken();
         if (!sameSource) {
           // 页面/任务点切换后，旧 frame 的媒体状态已经不可信，只清该来源对应的状态
@@ -931,6 +955,9 @@ export class HostController implements UiController {
               this.childMedia.delete(frameId);
             }
           }
+        } else if (!sameUrl) {
+          // SPA 内同一 iframe 换 URL：旧题目/媒体状态不能继续沿用
+          this.childMedia.delete(message.frameId);
         }
         this.children.set(message.frameId, {
           frameId: message.frameId,
@@ -940,7 +967,7 @@ export class HostController implements UiController {
           url: message.url,
           title: message.title,
           pageKind: message.pageKind,
-          questions: sameSource ? existing!.questions : [],
+          questions: sameUrl ? existing!.questions : [],
           lastSeen: Date.now(),
         });
         sendToWindow(source, createMessage({ t: "WELCOME", token, nonce: message.nonce }));
@@ -949,9 +976,6 @@ export class HostController implements UiController {
           sendToWindow(source, createMessage({ t: "PAUSE_MEDIA", token }));
         }
         sendToWindow(source, createMessage({ t: "COLLECT", token }));
-        if (this.autoTurn.isRunning) {
-          sendToWindow(source, createMessage({ t: "GUARD_START", token }));
-        }
         logger.debug("frame", `连接子 frame ${message.frameId}（${message.pageKind}）`);
         this.rebuildQuestions();
         break;
@@ -1148,10 +1172,17 @@ export class HostController implements UiController {
       } else {
         const previous = this.children.get(this.activeMediaFrameId);
         if (previous) {
+          // 先停守卫再暂停，避免旧 frame 的守卫把刚暂停的视频又恢复
+          sendToWindow(previous.source, createMessage({ t: "GUARD_STOP", token: previous.token }));
           sendToWindow(previous.source, createMessage({ t: "PAUSE_MEDIA", token: previous.token }));
         }
       }
       this.activeMediaFrameId = frameId;
+    }
+
+    // 守卫只跟随当前播放目标启动，避免所有子 frame 一起自动恢复暂停的视频。
+    if (this.autoTurn.isRunning) {
+      sendToWindow(target.source, createMessage({ t: "GUARD_START", token: target.token }));
     }
     sendToWindow(target.source, createMessage({ t: "RESUME_MEDIA", token: target.token }));
   }
@@ -1244,7 +1275,7 @@ export class HostController implements UiController {
     return { holder: false, heartbeatAt: external?.heartbeatAt ?? null };
   }
 
-  /** 自动翻页开始时启动顶层播放守卫，并通知已连接子 frame 启动各自守卫 */
+  /** 自动翻页开始时只启动顶层播放守卫；子 frame 的守卫在成为播放目标时再启动 */
   private startPlaybackGuard(): void {
     if (!this.hostGuard) {
       this.hostGuard = createPlaybackGuard({
@@ -1257,9 +1288,6 @@ export class HostController implements UiController {
         },
         onNotice: (message, level) => this.onGuardNotice(message, level),
       });
-    }
-    for (const child of this.children.values()) {
-      sendToWindow(child.source, createMessage({ t: "GUARD_START", token: child.token }));
     }
   }
 
@@ -1310,6 +1338,10 @@ export class HostController implements UiController {
     logger.info("nav", `页面跳转：${location.pathname}`);
     this.detectPage();
     this.localQuestions = [];
+    // 顶层 URL 变化后不要沿用旧章节的媒体/目标/题目状态；子 frame 会在 1 秒内重新上报。
+    this.childMedia.clear();
+    this.activeMediaFrameId = "";
+    for (const child of this.children.values()) child.questions = [];
     this.filledQuestionIds.clear();
     this.submitConfirmAt = 0;
     resetSubmitGuard(document);
@@ -1333,7 +1365,7 @@ export class HostController implements UiController {
       } catch {
         closed = false;
       }
-      if (closed || Date.now() - child.lastSeen > 15_000) {
+      if (closed || Date.now() - child.lastSeen > FRAME_STALE_MS) {
         this.children.delete(frameId);
         this.childMedia.delete(frameId);
         if (this.activeMediaFrameId === frameId) this.activeMediaFrameId = "";

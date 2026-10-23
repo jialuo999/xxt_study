@@ -66,20 +66,20 @@ export class AutoTurnRunner {
     return Boolean(session?.running);
   }
 
-  /** 刷新后恢复上次运行 */
-  restore(): void {
+  /** 刷新后恢复上次运行；返回是否真正恢复，供 Host 在失败时释放多标签锁 */
+  restore(): boolean {
     const settings = getSettings();
     if (!settings.autoTurn.enabled || !settings.autoTurn.resumeOnReload) {
       this.persist(false);
-      return;
+      return false;
     }
     const session = readSession();
-    if (!session?.running) return;
+    if (!session?.running) return false;
     // 只恢复同一页面/章节的会话，避免隔了很久在任意章节页刷新时“自己动起来”。
     if (session.lastUrl && taskUrlKey(session.lastUrl) !== taskUrlKey(location.href)) {
       logger.info("autoturn", "忽略过期的自动翻页会话（页面已变化）");
       this.persist(false);
-      return;
+      return false;
     }
     this.running = true;
     this.steps = session.steps;
@@ -88,6 +88,7 @@ export class AutoTurnRunner {
     logger.info("autoturn", `恢复自动翻页（第 ${this.steps} 步）`);
     this.emit("已恢复自动翻页，即将继续");
     setTimeout(() => void this.loop(), Math.max(800, settings.autoTurn.startDelayMs));
+    return true;
   }
 
   start(): void {

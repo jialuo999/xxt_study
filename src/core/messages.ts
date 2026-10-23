@@ -77,13 +77,18 @@ export function isFrameMessage(data: unknown): data is FrameMessage {
 }
 
 const MAX_ITEMS = 500;
+/**
+ * 跨 frame 文本上限。不能卡在 4000：题干/选项偶尔会超过 4000 字符，
+ * 整条 QUESTIONS 被拒绝会让题目静默消失；这里放宽到 20k，仍保留基本防滥用上限。
+ */
+const MAX_TEXT_LENGTH = 20_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isString(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 4000;
+  return typeof value === "string" && value.length <= MAX_TEXT_LENGTH;
 }
 
 /**

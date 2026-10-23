@@ -113,6 +113,26 @@ describe("AutoTurnRunner 翻页校验", () => {
     runner.stop("测试结束");
   });
 
+  it("restore 在会话页面与当前页面不一致时返回 false，供 Host 释放锁", () => {
+    updateSettings({ autoTurn: { enabled: true, resumeOnReload: true } });
+    sessionStorage.setItem(
+      "study-helper.autoturn.v1",
+      JSON.stringify({
+        running: true,
+        steps: 2,
+        visited: [],
+        lastUrl: "https://mooc1.chaoxing.com/mycourse/studentstudy?chapterId=old-chapter",
+        savedAt: Date.now(),
+      }),
+    );
+    const host = makeHost({ signature: () => "restore" });
+    const runner = new AutoTurnRunner(host);
+
+    expect(runner.restore()).toBe(false);
+    expect(runner.isRunning).toBe(false);
+    sessionStorage.removeItem("study-helper.autoturn.v1");
+  });
+
   it("检测到人机验证时停止翻页且不点击下一页", async () => {
     const host = makeHost({ signature: () => "verification" });
     host.hasVerificationChallenge = () => true;

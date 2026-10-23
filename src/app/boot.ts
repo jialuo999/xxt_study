@@ -17,7 +17,9 @@ export async function boot(): Promise<void> {
 
   // 每一帧都应用媒体偏好；跨域 iframe 由该 iframe 内的脚本自行处理
   const stopMediaPreferences = startMediaPreferences();
-  window.addEventListener("pagehide", () => {
+  window.addEventListener("pagehide", (event) => {
+    // bfcache 只冻结页面，不能在这里销毁；否则退后恢复时媒体偏好失效
+    if (event.persisted) return;
     try {
       stopMediaPreferences();
     } catch {
@@ -36,7 +38,8 @@ export async function boot(): Promise<void> {
 
   const agent = new FrameAgent(findUiHost());
   agent.start();
-  window.addEventListener("pagehide", () => {
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) return;
     try {
       agent.dispose();
     } catch {

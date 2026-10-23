@@ -218,14 +218,14 @@ export function HomePage({ controller, state, onNavigate }: PageProps) {
             size="sm"
             variant="primary"
             icon="send"
-            disabled={busy || questions.length === 0 || examBlocked || hintMode || filledCount === 0}
+            disabled={busy || questions.length === 0 || examBlocked || hintMode}
             onClick={() => void controller.submit()}
           >
             提交
           </Button>
         </div>
         <div class="sh-hint" style="margin-top:6px">
-          已填入 {filledCount}/{questions.length} 题 · 默认人工复核
+          已填入 {filledCount}/{questions.length} 题 · 手动填写后首次提交需二次确认
         </div>
         {questions.length > 0 ? (
           <div class="sh-hint" style="margin-top:8px">

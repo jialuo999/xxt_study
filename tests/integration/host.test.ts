@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => {
     frameId: "top",
     index: 0,
   };
-  const calls = { fill: 0, submit: 0 };
+  const calls = { fill: 0, submit: 0, submitOptions: [] as Array<{ autoConfirm?: boolean }> };
   const adapter = {
     id: "fake",
     label: "Fake",
@@ -32,8 +32,9 @@ const fixture = vi.hoisted(() => {
       calls.fill += 1;
       return { questionId: "q1", ok: true, expected: "B", actual: "B" };
     },
-    submit: async () => {
+    submit: async (_ctx: unknown, options?: { autoConfirm?: boolean }) => {
       calls.submit += 1;
+      calls.submitOptions.push(options ?? {});
       return { ok: true, message: "提交成功" };
     },
     nextPage: async () => ({ ok: false, action: "none", message: "没有下一页" }),
@@ -97,6 +98,7 @@ describe("HostController 集成", () => {
     });
     fixture.calls.fill = 0;
     fixture.calls.submit = 0;
+    fixture.calls.submitOptions = [];
   });
 
   afterEach(() => {
@@ -123,6 +125,8 @@ describe("HostController 集成", () => {
 
     await controller.submit();
     expect(fixture.calls.submit).toBe(1);
+    // 复核模式即便覆盖率 100%，也不应自动点掉平台原生确认框
+    expect(fixture.calls.submitOptions.at(-1)?.autoConfirm).toBe(false);
     expect(controller.state.lastSubmit?.ok).toBe(true);
 
     controller.dispose();
@@ -164,7 +168,7 @@ describe("HostController 集成", () => {
     controller.dispose();
   });
 
-  it("没有先填入时拒绝提交，填入后才允许提交", async () => {
+  it("没有先填入时首次提交需二次确认，手动填写也能提交", async () => {
     const { HostController } = await import("../../src/app/host");
     const controller = new HostController();
     await controller.init();
@@ -173,11 +177,23 @@ describe("HostController 集成", () => {
     await controller.submit();
     expect(fixture.calls.submit).toBe(0);
 
-    expect(await controller.fillAll()).toBe(true);
-    expect(controller.state.filledQuestionIds).toEqual(["q1"]);
-
+    // 第二次点击视为用户显式确认（覆盖“用户手动填写”场景）
     await controller.submit();
     expect(fixture.calls.submit).toBe(1);
+    expect(fixture.calls.submitOptions.at(-1)?.autoConfirm).toBe(true);
+    controller.dispose();
+  });
+
+  it("脚本填入后复核模式仍由用户确认平台弹窗", async () => {
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    await controller.init();
+
+    await controller.solve();
+    expect(await controller.fillAll()).toBe(true);
+    await controller.submit();
+    expect(fixture.calls.submit).toBe(1);
+    expect(fixture.calls.submitOptions.at(-1)?.autoConfirm).toBe(false);
     controller.dispose();
   });
 

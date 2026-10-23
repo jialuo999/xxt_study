@@ -221,7 +221,11 @@ export function redactSettings(settings: Settings): unknown {
   if (!copy || typeof copy !== "object") return copy;
 
   const ai = asRecord(copy.ai);
-  if (ai) ai.apiKey = typeof ai.apiKey === "string" && ai.apiKey.trim() ? "已设置" : "未设置";
+  if (ai) {
+    ai.apiKey = typeof ai.apiKey === "string" && ai.apiKey.trim() ? "已设置" : "未设置";
+    // 兼容把 key/token 放在 baseUrl query 里的自定义网关
+    if (typeof ai.baseUrl === "string") ai.baseUrl = sanitizeEndpoint(ai.baseUrl);
+  }
 
   const remote = asRecord(asRecord(copy.bank)?.remote);
   if (remote) {
@@ -232,6 +236,10 @@ export function redactSettings(settings: Settings): unknown {
       remote.headers = masked;
     }
     if (typeof remote.url === "string") remote.url = sanitizeEndpoint(remote.url);
+    // 模板里可能包含用户写死的 token；复用 logger 的密钥脱敏规则兜底
+    if (typeof remote.bodyTemplate === "string") {
+      remote.bodyTemplate = redact(remote.bodyTemplate);
+    }
   }
 
   return copy;
@@ -322,7 +330,7 @@ function sanitizeFrames(frames: readonly FrameSummary[]): FrameSummary[] {
   return frames.map((frame) => ({
     frameId: frame.frameId,
     url: sanitizeUrl(frame.url),
-    title: frame.title,
+    title: redact(frame.title ?? ""),
     pageKind: frame.pageKind,
     questionCount: frame.questionCount,
     isTop: frame.isTop,

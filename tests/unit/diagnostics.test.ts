@@ -314,6 +314,22 @@ describe("脱敏", () => {
     expect(serialized).not.toContain("signed=leak");
   });
 
+  it("AI baseUrl 的 query token 与远程模板里的密钥也会脱敏", () => {
+    const input = makeInput();
+    input.settings.ai.baseUrl = "https://api.example.com/v1?token=ai-secret";
+    input.settings.bank.remote.bodyTemplate =
+      '{"question":"{{question}}","key":"sk-abcdefghijklmnopqrst"}';
+
+    const report = buildDiagnostics(input, document, "1.0.0");
+    const settings = report.settings as {
+      ai: { baseUrl: string };
+      bank: { remote: { bodyTemplate: string } };
+    };
+    expect(settings.ai.baseUrl).toBe("https://api.example.com/v1");
+    expect(settings.bank.remote.bodyTemplate).not.toContain("sk-abcdefghijklmnopqrst");
+    expect(JSON.stringify(report)).not.toContain("ai-secret");
+  });
+
   it("日志只保留最近 100 条并再次脱敏", () => {
     const report = buildDiagnostics(makeInput(), document, "1.0.0");
 
