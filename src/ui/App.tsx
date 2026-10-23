@@ -234,6 +234,18 @@ export function App({ controller }: { controller: UiController }) {
             ))}
           </nav>
 
+          {state.verification.detected ? (
+            <div class="sh-verify" role="alert">
+              <Icon name="alert" size={15} />
+              <div class="sh-verify__copy">
+                <div class="sh-verify__title">需要手动完成人机验证</div>
+                <div class="sh-verify__desc">
+                  {`${state.verification.message || "平台要求人机验证"}。自动翻页不会继续，请在页面中完成验证后重新开始。`}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div class="sh-content">
             {tab === "home" ? (
               <HomePage controller={controller} state={state} onNavigate={setTab} />

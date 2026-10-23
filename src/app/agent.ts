@@ -11,6 +11,7 @@ import { getAdapter } from "@/platform/registry";
 import { primeFontDecoder } from "@/platform/chaoxing/font/decoder";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { frameId as getFrameId } from "./frames";
+import { collectTaskPointState } from "./task-points";
 import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
 
 const UNKNOWN: PageInfo = {
@@ -230,42 +231,8 @@ export class FrameAgent {
   }
 
   /** 学习通任务点完成状态（内容 frame 中 .ans-job-icon 的父级类名） */
-  private taskPointState(): { currentTaskFinished: boolean; allTasksFinished: boolean } {
-    const result = { currentTaskFinished: false, allTasksFinished: false };
-    try {
-      const icons = Array.from(document.querySelectorAll<HTMLElement>(".ans-job-icon"));
-      if (icons.length === 0) return result;
-      const items = icons
-        .map((icon) => icon.parentElement)
-        .filter((item): item is HTMLElement => Boolean(item));
-      if (items.length === 0) return result;
-      result.allTasksFinished = items.every((item) =>
-        item.classList.contains("ans-job-finished"),
-      );
-      for (const item of items) {
-        const iframe = item.querySelector("iframe");
-        if (!iframe) continue;
-        let visible = true;
-        try {
-          const rect = iframe.getBoundingClientRect();
-          visible = rect.width > 0 && rect.height > 0;
-        } catch {
-          /* ignore */
-        }
-        if (visible) {
-          const win = iframe.ownerDocument.defaultView;
-          const style = win?.getComputedStyle(iframe);
-          if (style && (style.display === "none" || style.visibility === "hidden")) visible = false;
-        }
-        if (visible && item.classList.contains("ans-job-finished")) {
-          result.currentTaskFinished = true;
-          break;
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    return result;
+  private taskPointState(): ReturnType<typeof collectTaskPointState> {
+    return collectTaskPointState(document);
   }
 
   private reportMediaState(): void {

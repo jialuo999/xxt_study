@@ -77,6 +77,24 @@ describe("waitForMedia", () => {
     await expect(promise).resolves.toBe("done");
   });
 
+  it("多视频时跳过已完成任务点，只恢复未完成任务点的视频", async () => {
+    const finished = mockVideo({ playSucceeds: true });
+    const finishedTask = document.createElement("div");
+    finishedTask.className = "ans-job-finished";
+    finishedTask.appendChild(finished);
+    document.body.prepend(finishedTask);
+
+    const active = mockVideo({ playSucceeds: true });
+    const promise = waitForMedia(document, 10000, () => true, preferences);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(active.play).toHaveBeenCalled();
+    expect(finished.play).not.toHaveBeenCalled();
+
+    finishMedia(active);
+    await vi.advanceTimersByTimeAsync(3000);
+    await expect(promise).resolves.toBe("done");
+  });
+
   it("播放结束后播放器立即循环，也能识别为完成", async () => {
     const video = document.createElement("video");
     let paused = false;

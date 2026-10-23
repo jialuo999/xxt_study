@@ -31,6 +31,7 @@ import {
 } from "@/core/messages";
 import { getAdapter } from "@/platform/registry";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
+import { detectVerificationChallenge } from "@/platform/chaoxing/verification";
 import {
   initBank,
   getBankStats,
@@ -52,6 +53,7 @@ import type {
   UiState,
 } from "@/ui/contract";
 import { AutoTurnRunner } from "./autoturn";
+import type { MediaPlaybackTarget } from "./autoturn";
 import { collectMedia } from "./media-preferences";
 
 const NOTICE_KEY = "study-helper.notice.v1";
@@ -81,6 +83,21 @@ function taskUrlKey(raw: string): string {
     return `${url.origin}${url.pathname}${search ? `?${search}` : ""}`;
   } catch {
     return raw;
+  }
+}
+
+/** 任务点 iframe 与子 frame URL 的最终兜底：jobid / objectid */
+function taskKeyParam(url: URL): string {
+  try {
+    return (
+      url.searchParams.get("jobid") ??
+      url.searchParams.get("jobId") ??
+      url.searchParams.get("objectid") ??
+      url.searchParams.get("objectId") ??
+      ""
+    );
+  } catch {
+    return "";
   }
 }
 
@@ -136,6 +153,7 @@ export class HostController implements UiController {
     this.state = {
       ready: false,
       page: { ...UNKNOWN_PAGE, title: document.title },
+      verification: { detected: false, message: "" },
       frames: [],
       questions: [],
       results: {},
@@ -163,9 +181,12 @@ export class HostController implements UiController {
       getPage: () => this.state.page,
       hasUnansweredQuestions: () => this.hasUnansweredQuestions(),
       getChildMediaState: () => this.getChildMediaState(),
+      getMediaPlaybackTarget: () => this.getMediaPlaybackTarget(),
+      activateMediaFrame: (frameId) => this.activateMediaFrame(frameId),
       resumeChildMedia: () => this.resumeChildMedia(),
       pauseMedia: () => this.pauseMedia(),
       getTaskSignature: () => this.getTaskSignature(),
+      hasVerificationChallenge: () => this.state.verification.detected,
       onState: (autoTurn) => this.patch({ autoTurn }),
       onStopped: (reason) => {
         this.toast("info", reason);
@@ -195,13 +216,15 @@ export class HostController implements UiController {
       subscribeLogs((logs) => this.patch({ logs })),
     );
     this.detectPage();
+    this.checkVerification();
     this.patch({ page: this.state.page, settings: getSettings() });
 
     await this.initBankSafe();
     await this.refresh();
-    if (this.isAutoTurnPage()) this.autoTurn.restore();
+    if (!this.state.verification.detected && this.isAutoTurnPage()) this.autoTurn.restore();
 
     this.urlTimer = setInterval(() => {
+      this.checkVerification();
       if (location.href !== this.lastHref) {
         this.lastHref = location.href;
         void this.onNavigation();
@@ -209,8 +232,13 @@ export class HostController implements UiController {
     }, 1200);
     this.frameSweepTimer = setInterval(() => this.sweepFrames(), 10000);
 
-    this.patch({ ready: true, statusText: "待命" });
-    this.toast("info", "学习助手已就绪，默认人工复核");
+    this.patch({
+      ready: true,
+      statusText: this.state.verification.detected ? "需要手动验证" : "待命",
+    });
+    if (!this.state.verification.detected) {
+      this.toast("info", "学习助手已就绪，默认人工复核");
+    }
   }
 
   subscribe(listener: (state: UiState) => void): () => void {
@@ -219,6 +247,7 @@ export class HostController implements UiController {
   }
 
   async refresh(): Promise<void> {
+    if (this.checkVerification()) return;
     const seq = ++this.refreshSeq;
     this.patch({ status: "scanning", statusText: "扫描题目…" });
     this.detectPage();
@@ -433,6 +462,10 @@ export class HostController implements UiController {
   }
 
   startAutoTurn(): void {
+    if (this.state.verification.detected) {
+      this.toast("warn", "请先在页面上完成人机验证，再开始自动翻页");
+      return;
+    }
     if (this.isExamBlocked()) {
       this.toast("warn", "考试页面已保护：禁止自动翻页");
       return;
@@ -614,6 +647,42 @@ export class HostController implements UiController {
     } catch (error) {
       logger.warn("bank", "读取题库统计失败", error);
     }
+  }
+
+  /**
+   * 检测学习通【9010】/图片验证码页面。
+   * 不尝试识别或绕过验证码：只暂停自动翻页、阻止继续点击，并持续提示用户手动处理。
+   */
+  private checkVerification(): boolean {
+    const view = detectVerificationChallenge(document);
+    const previous = this.state.verification.detected;
+
+    if (view.detected) {
+      if (!previous) {
+        logger.warn("verify", "检测到平台人机验证，自动翻页已暂停", { message: view.message });
+      }
+      if (this.autoTurn.isRunning) {
+        this.autoTurn.stop("检测到平台验证，自动翻页已暂停；请手动完成验证后重新开始");
+      }
+      if (!previous) {
+        this.toast("warn", "检测到平台人机验证，请先在页面上完成验证");
+      }
+      if (
+        !previous ||
+        this.state.status !== "error" ||
+        this.state.statusText !== "需要手动验证"
+      ) {
+        this.patch({ verification: view, status: "error", statusText: "需要手动验证" });
+      }
+      return true;
+    }
+
+    if (previous) {
+      logger.info("verify", "页面验证已通过");
+      this.patch({ verification: view, status: "idle", statusText: "验证已通过，可重新开始" });
+      this.toast("success", "验证已通过，可以重新开始自动翻页");
+    }
+    return false;
   }
 
   private detectPage(): void {
@@ -861,6 +930,99 @@ export class HostController implements UiController {
     } catch {
       return "";
     }
+  }
+
+  /**
+   * 学习通同页多任务点时，按任务点 DOM 顺序选出当前应播放的子 frame。
+   *
+   * 内容 frame 的 agent 会上报第一个“未完成且带 iframe”的任务点 URL；
+   * 这里把该 URL 与已连接子 frame 的 URL 匹配，自动翻页只激活这一个 frame，
+   * 其他 frame 暂停，避免多个视频同时播放/互相抢进度。
+   */
+  getMediaPlaybackTarget(): MediaPlaybackTarget | null {
+    const entries = [...this.childMedia.entries()].filter(
+      ([, item]) => Date.now() - item.at < 3500,
+    );
+    const taskEntry = entries
+      .filter(
+        ([, item]) =>
+          item.state.taskTotal !== undefined ||
+          item.state.nextTaskUrl !== undefined ||
+          item.state.allTasksFinished !== undefined,
+      )
+      .sort((a, b) => b[1].at - a[1].at)[0];
+    if (!taskEntry) return null;
+
+    const state = taskEntry[1].state;
+    if (state.allTasksFinished) {
+      return {
+        frameId: null,
+        taskUrl: "",
+        taskIndex: -1,
+        taskTotal: state.taskTotal ?? 0,
+        state: null,
+        allTasksFinished: true,
+      };
+    }
+    const taskUrl = state.nextTaskUrl;
+    if (!taskUrl) return null;
+
+    const child = this.findChildForTask(taskUrl);
+    return {
+      frameId: child?.frameId ?? null,
+      taskUrl,
+      taskIndex: state.nextTaskIndex ?? 0,
+      taskTotal: state.taskTotal ?? 0,
+      state: child ? (this.childMedia.get(child.frameId)?.state ?? null) : null,
+      allTasksFinished: false,
+    };
+  }
+
+  /** 只恢复指定子 frame 的媒体，并暂停其他子 frame，保证一次只播一个任务点 */
+  activateMediaFrame(frameId: string): void {
+    for (const child of this.children.values()) {
+      sendToWindow(
+        child.source,
+        createMessage({
+          t: child.frameId === frameId ? "RESUME_MEDIA" : "PAUSE_MEDIA",
+          token: child.token,
+        }),
+      );
+    }
+  }
+
+  private findChildForTask(taskUrl: string): ChildFrame | null {
+    // 优先最近活跃的 frame，避免任务点切换后匹配到尚未被 sweep 清理的旧 frame
+    const children = [...this.children.values()]
+      .filter((child) => {
+        try {
+          return !child.source.closed;
+        } catch {
+          return false;
+        }
+      })
+      .sort((a, b) => b.lastSeen - a.lastSeen);
+    const targetKey = taskUrlKey(taskUrl);
+    for (const child of children) {
+      if (taskUrlKey(child.url) === targetKey) return child;
+    }
+    // 部分播放器 URL 会追加随机参数，退化为按 jobid / objectid 匹配
+    try {
+      const target = new URL(taskUrl);
+      const targetJob = taskKeyParam(target);
+      if (targetJob) {
+        for (const child of children) {
+          try {
+            if (taskKeyParam(new URL(child.url)) === targetJob) return child;
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
   }
 
   /** 汇总子 frame 的媒体状态，供自动翻页判断视频/音频是否结束 */

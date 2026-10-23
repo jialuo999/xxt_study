@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AutoTurnRunner, type AutoTurnHost } from "../../src/app/autoturn";
+import { AutoTurnRunner, type AutoTurnHost, type MediaPlaybackTarget } from "../../src/app/autoturn";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 import type { PageInfo } from "../../src/core/types";
@@ -43,9 +43,12 @@ function makeHost(options: {
     getPage: () => page,
     hasUnansweredQuestions: () => false,
     getChildMediaState: () => null,
+    getMediaPlaybackTarget: () => null,
+    activateMediaFrame: () => undefined,
     resumeChildMedia: () => undefined,
     pauseMedia: () => undefined,
     getTaskSignature: options.signature,
+    hasVerificationChallenge: () => false,
     onState: (state) => states.push(state),
     onStopped: (reason) => stopped.push(reason),
   };
@@ -73,6 +76,53 @@ describe("AutoTurnRunner 翻页校验", () => {
   afterEach(() => {
     vi.useRealTimers();
     replaceSettings(structuredClone(DEFAULT_SETTINGS));
+  });
+
+  it("同页多任务点时按顺序激活，且只恢复当前任务点", async () => {
+    const host = makeHost({ signature: () => "multi-task" });
+    let target: MediaPlaybackTarget = {
+      frameId: "frame-a",
+      taskUrl: "https://mooc1.chaoxing.com/ananas/modules/video/index.html?jobid=1",
+      taskIndex: 0,
+      taskTotal: 2,
+      state: { hasMedia: true, allEnded: false, anyPaused: false },
+      allTasksFinished: false,
+    };
+    const activated: string[] = [];
+    host.getMediaPlaybackTarget = () => target;
+    host.activateMediaFrame = (frameId) => activated.push(frameId);
+
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(activated[0]).toBe("frame-a");
+
+    target = {
+      ...target,
+      frameId: "frame-b",
+      taskIndex: 1,
+      taskUrl: "https://mooc1.chaoxing.com/ananas/modules/video/index.html?jobid=2",
+    };
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(activated).toContain("frame-b");
+
+    target = { ...target, frameId: null, state: null, allTasksFinished: true };
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(host.nextPage).toHaveBeenCalled();
+
+    runner.stop("测试结束");
+  });
+
+  it("检测到人机验证时停止翻页且不点击下一页", async () => {
+    const host = makeHost({ signature: () => "verification" });
+    host.hasVerificationChallenge = () => true;
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(host.nextPage).not.toHaveBeenCalled();
+    expect(host.stopped.some((reason) => reason.includes("验证"))).toBe(true);
+    expect(runner.isRunning).toBe(false);
   });
 
   it("点击后任务点签名变化才计为一步", async () => {

@@ -23,13 +23,30 @@ export interface AutoTurnHost {
   getPage(): PageInfo;
   hasUnansweredQuestions(): boolean;
   getChildMediaState(): MediaState | null;
+  /** 按任务点顺序返回当前应播放的子 frame（没有任务点信息时为 null） */
+  getMediaPlaybackTarget(): MediaPlaybackTarget | null;
+  /** 只恢复指定子 frame 的媒体，并暂停其他子 frame */
+  activateMediaFrame(frameId: string): void;
   resumeChildMedia(): void;
   /** 停止翻页时暂停当前页面/子 frame 的视频与音频 */
   pauseMedia(): void;
   /** 顶层 URL + 子 frame URL/类型的稳定签名，用于判断任务点是否切换 */
   getTaskSignature(): string;
+  /** 平台是否弹出人机验证（【9010】验证码页）；检测到后不得继续点击 */
+  hasVerificationChallenge(): boolean;
   onState(state: AutoTurnView): void;
   onStopped(reason: string): void;
+}
+
+/** 学习通同页多任务点时的播放目标 */
+export interface MediaPlaybackTarget {
+  /** 匹配到的子 frame；null 表示任务点 iframe 尚未连接或全部完成 */
+  frameId: string | null;
+  taskUrl: string;
+  taskIndex: number;
+  taskTotal: number;
+  state: MediaState | null;
+  allTasksFinished: boolean;
 }
 
 export class AutoTurnRunner {
@@ -96,6 +113,13 @@ export class AutoTurnRunner {
     this.host.onStopped(reason);
   }
 
+  /** 检测到平台人机验证时立即停止，避免继续点击加重风控 */
+  private stopForVerification(): boolean {
+    if (!this.host.hasVerificationChallenge()) return false;
+    this.stop("检测到平台验证，自动翻页已暂停；请手动完成验证后重新开始");
+    return true;
+  }
+
   private async loop(): Promise<void> {
     const token = ++this.loopToken;
     if (!this.running) return;
@@ -110,6 +134,7 @@ export class AutoTurnRunner {
       this.stop("当前页面不是章节/视频页，自动翻页已停止");
       return;
     }
+    if (this.stopForVerification()) return;
     if (this.steps >= settings.autoTurn.maxSteps) {
       this.stop(`已达到最大步数（${settings.autoTurn.maxSteps}），已停止`);
       return;
@@ -119,85 +144,121 @@ export class AutoTurnRunner {
       return;
     }
 
+    const isAlive = () => this.running && token === this.loopToken;
     let external: MediaState | null = null;
+    let mediaHandled = false;
+
     if (settings.autoTurn.waitVideoEnd) {
-      external = this.host.getChildMediaState();
-      if (!external?.hasMedia && document.querySelector("iframe")) {
-        // 跨域 iframe 的媒体状态由子 frame 上报，刚进入页面时可能还没到
-        external = await this.discoverChildMedia(
-          2000,
-          () => this.running && token === this.loopToken,
-        );
+      // 学习通同页多个任务点时，按任务点 DOM 顺序只播放当前的子 frame
+      let target = this.host.getMediaPlaybackTarget();
+      if (!target && document.querySelector("iframe")) {
+        target = await this.discoverMediaPlaybackTarget(2000, isAlive);
+      }
+      if (target) {
+        if (target.allTasksFinished) {
+          mediaHandled = true;
+          this.emit("当前任务点均已完成，跳过等待", false);
+          logger.info("autoturn", "当前章节任务点均已完成，跳过媒体等待");
+        } else {
+          const label = target.taskTotal
+            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个任务点`
+            : `第 ${target.taskIndex + 1} 个任务点`;
+          this.emit(`按顺序播放${label}`, false);
+          logger.info("autoturn", `按任务点顺序等待${label}`, { frameId: target.frameId });
+          const taskResult = await this.waitForTaskMedia(isAlive);
+          if (!this.running || token !== this.loopToken) return;
+          if (taskResult === "timeout") {
+            this.stop("等待任务点视频结束超时，已暂停");
+            return;
+          }
+          if (taskResult === "blocked") {
+            this.stop("任务点视频处于暂停且无法自动恢复，请手动播放后重新开始");
+            return;
+          }
+          if (taskResult === "stalled") {
+            this.stop("视频已结束，但任务点未标记完成；请手动确认后再继续");
+            return;
+          }
+          if (taskResult === "done") mediaHandled = true;
+        }
       }
     }
 
-    const taskFinished = Boolean(external?.currentTaskFinished);
-    if (taskFinished) {
-      this.emit("当前任务点均已完成，跳过等待", false);
-      logger.info("autoturn", "当前任务点均已完成，跳过媒体等待");
-    } else if (external?.allTasksFinished) {
-      logger.debug("autoturn", "当前章节任务点均已完成", external);
-    }
-    if (settings.autoTurn.waitVideoEnd && !taskFinished) {
-      this.emit("等待视频/音频播放结束…", false);
-      if (external?.hasMedia) {
-        const externalResult = await this.waitForExternalMedia(
-          45 * 60 * 1000,
-          () => this.running && token === this.loopToken,
-          settings.video.resumeOnPause,
-        );
-        if (!this.running || token !== this.loopToken) return;
-        if (externalResult === "blocked") {
-          this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
-          return;
-        }
-        if (externalResult === "timeout") {
-          this.stop("等待视频/音频结束超时，已暂停");
-          return;
-        }
+    if (settings.autoTurn.waitVideoEnd && !mediaHandled) {
+      external = this.host.getChildMediaState();
+      if (!external?.hasMedia && document.querySelector("iframe")) {
+        // 跨域 iframe 的媒体状态由子 frame 上报，刚进入页面时可能还没到
+        external = await this.discoverChildMedia(2000, isAlive);
       }
-      const localMedia = findMedia(document);
-      let localResult: MediaWaitResult = "done";
-      if (!external?.hasMedia || localMedia.length > 0) {
-        localResult = await waitForMedia(
-          document,
-          MEDIA_WAIT_TIMEOUT,
-          () => this.running && token === this.loopToken,
-          settings.video,
-        );
-        if (!this.running || token !== this.loopToken) return;
-        if (localResult === "blocked") {
-          this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
-          return;
-        }
-        if (localResult === "timeout") {
-          this.stop("等待视频/音频结束超时，已暂停");
-          return;
-        }
+
+      const taskFinished = Boolean(external?.currentTaskFinished);
+      if (taskFinished) {
+        this.emit("当前任务点均已完成，跳过等待", false);
+        logger.info("autoturn", "当前任务点均已完成，跳过媒体等待");
+      } else if (external?.allTasksFinished) {
+        logger.debug("autoturn", "当前章节任务点均已完成", external);
       }
-      if (localResult === "none") {
-        // 本地没找到媒体时，再给子 frame 一次上报机会
-        const lateExternal = this.host.getChildMediaState();
-        if (lateExternal?.hasMedia) {
-          const lateResult = await this.waitForExternalMedia(
-            45 * 60 * 1000,
-            () => this.running && token === this.loopToken,
+      if (!taskFinished) {
+        this.emit("等待视频/音频播放结束…", false);
+        if (external?.hasMedia) {
+          const externalResult = await this.waitForExternalMedia(
+            MEDIA_WAIT_TIMEOUT,
+            isAlive,
             settings.video.resumeOnPause,
           );
           if (!this.running || token !== this.loopToken) return;
-          if (lateResult === "blocked") {
+          if (externalResult === "blocked") {
             this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
             return;
           }
-          if (lateResult === "timeout") {
+          if (externalResult === "timeout") {
             this.stop("等待视频/音频结束超时，已暂停");
             return;
           }
-        } else if (settings.autoTurn.contentWaitMs > 0) {
-          const wait = Math.min(120000, Math.max(0, settings.autoTurn.contentWaitMs));
-          this.emit(`未检测到音视频，等待 ${Math.ceil(wait / 1000)} 秒后翻页`, false, Date.now() + wait);
-          await sleep(wait);
+        }
+        const localMedia = findMedia(document);
+        let localResult: MediaWaitResult = "done";
+        if (!external?.hasMedia || localMedia.length > 0) {
+          localResult = await waitForMedia(
+            document,
+            MEDIA_WAIT_TIMEOUT,
+            isAlive,
+            settings.video,
+          );
           if (!this.running || token !== this.loopToken) return;
+          if (localResult === "blocked") {
+            this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+            return;
+          }
+          if (localResult === "timeout") {
+            this.stop("等待视频/音频结束超时，已暂停");
+            return;
+          }
+        }
+        if (localResult === "none") {
+          // 本地没找到媒体时，再给子 frame 一次上报机会
+          const lateExternal = this.host.getChildMediaState();
+          if (lateExternal?.hasMedia) {
+            const lateResult = await this.waitForExternalMedia(
+              MEDIA_WAIT_TIMEOUT,
+              isAlive,
+              settings.video.resumeOnPause,
+            );
+            if (!this.running || token !== this.loopToken) return;
+            if (lateResult === "blocked") {
+              this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+              return;
+            }
+            if (lateResult === "timeout") {
+              this.stop("等待视频/音频结束超时，已暂停");
+              return;
+            }
+          } else if (settings.autoTurn.contentWaitMs > 0) {
+            const wait = Math.min(120000, Math.max(0, settings.autoTurn.contentWaitMs));
+            this.emit(`未检测到音视频，等待 ${Math.ceil(wait / 1000)} 秒后翻页`, false, Date.now() + wait);
+            await sleep(wait);
+            if (!this.running || token !== this.loopToken) return;
+          }
         }
       }
     }
@@ -206,6 +267,7 @@ export class AutoTurnRunner {
     this.emit(`${Math.max(1, Math.ceil(delay / 1000))} 秒后翻页`, false, Date.now() + delay);
     await sleep(delay);
     if (!this.running || token !== this.loopToken) return;
+    if (this.stopForVerification()) return;
 
     const adapter = this.host.getAdapter();
     const context = this.host.getContext();
@@ -296,6 +358,119 @@ export class AutoTurnRunner {
     return this.host.getChildMediaState();
   }
 
+  private async discoverMediaPlaybackTarget(
+    timeoutMs: number,
+    isAlive: () => boolean,
+  ): Promise<MediaPlaybackTarget | null> {
+    const started = Date.now();
+    let latest: MediaPlaybackTarget | null = null;
+    while (Date.now() - started < timeoutMs) {
+      if (!isAlive()) return latest;
+      latest = this.host.getMediaPlaybackTarget();
+      if (latest) return latest;
+      await sleep(300);
+    }
+    return this.host.getMediaPlaybackTarget();
+  }
+
+  /**
+   * 学习通同页多任务点：按任务点顺序播放。
+   * 只对当前任务点的子 frame 发送恢复播放，其他 frame 暂停；
+   * 等它播完且任务点标记完成后，再切到下一个任务点。
+   */
+  private async waitForTaskMedia(isAlive: () => boolean): Promise<MediaWaitResult> {
+    const settings = getSettings();
+    const started = Date.now();
+    let lastFrameId = "";
+    let lastActivate = 0;
+    let pausedSince = 0;
+    let lastNotice = 0;
+    let pendingSince = 0;
+    let endedSince = 0;
+    let noMediaSince = 0;
+
+    while (Date.now() - started < MEDIA_WAIT_TIMEOUT) {
+      if (!isAlive()) return "none";
+      const target = this.host.getMediaPlaybackTarget();
+      if (!target) return "none";
+      if (target.allTasksFinished) return "done";
+
+      if (!target.frameId) {
+        if (!pendingSince) pendingSince = Date.now();
+        if (Date.now() - pendingSince > 8000) {
+          logger.warn("autoturn", "任务点 iframe 尚未匹配到子 frame，回退到通用媒体等待");
+          return "none";
+        }
+        await sleep(500);
+        continue;
+      }
+      pendingSince = 0;
+
+      const state = target.state;
+      if (!state) {
+        if (!noMediaSince) noMediaSince = Date.now();
+        if (Date.now() - noMediaSince > 10000) {
+          logger.warn("autoturn", "任务点 iframe 未上报媒体，按已完成处理", {
+            frameId: target.frameId,
+          });
+          return "done";
+        }
+      } else {
+        noMediaSince = 0;
+      }
+
+      if (state?.allEnded) {
+        if (!endedSince) {
+          endedSince = Date.now();
+          this.emit("任务点视频已结束，等待任务点完成…", false);
+          logger.info("autoturn", "任务点视频结束，等待任务点完成标记", {
+            frameId: target.frameId,
+          });
+        }
+        // 视频结束后平台通常很快写回 .ans-job-finished；超时则停止而不是直接翻页，
+        // 避免把还没标记完成的后续任务点跳过去。
+        if (Date.now() - endedSince > 20000) return "stalled";
+        await sleep(600);
+        continue;
+      }
+      endedSince = 0;
+
+      const frameChanged = target.frameId !== lastFrameId;
+      if (frameChanged || Date.now() - lastActivate > 4000) {
+        lastFrameId = target.frameId;
+        lastActivate = Date.now();
+        this.host.activateMediaFrame(target.frameId);
+        if (frameChanged) {
+          const label = target.taskTotal
+            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个任务点`
+            : `第 ${target.taskIndex + 1} 个任务点`;
+          this.emit(`开始播放${label}`, false);
+          logger.info("autoturn", `开始播放${label}`, { frameId: target.frameId });
+        }
+      }
+
+      if (settings.video.resumeOnPause && state?.anyPaused) {
+        if (!pausedSince) pausedSince = Date.now();
+        if (Date.now() - lastActivate > 1500) {
+          lastActivate = Date.now();
+          this.host.activateMediaFrame(target.frameId);
+        }
+        if (Date.now() - pausedSince > 8000 && Date.now() - lastNotice > 15000) {
+          lastNotice = Date.now();
+          this.emit(`第 ${target.taskIndex + 1} 个任务点视频已暂停，请手动点击播放`, false);
+          logger.info("autoturn", "任务点视频暂停且无法自动恢复，等待手动播放", {
+            frameId: target.frameId,
+          });
+        }
+      } else {
+        pausedSince = 0;
+      }
+
+      await sleep(500);
+    }
+    return "timeout";
+  }
+
   private async waitForExternalMedia(
     timeoutMs: number,
     isAlive: () => boolean,
@@ -369,10 +544,19 @@ function readSession(): AutoTurnSession | null {
   }
 }
 
-export type MediaWaitResult = "done" | "none" | "blocked" | "timeout";
+export type MediaWaitResult = "done" | "none" | "blocked" | "timeout" | "stalled";
 
 function findMedia(doc: Document): HTMLMediaElement[] {
   return collectMedia(doc);
+}
+
+/** 媒体所在任务点是否已完成（学习通 .ans-job-finished） */
+function isTaskPointFinished(media: HTMLMediaElement): boolean {
+  try {
+    return Boolean(media.closest(".ans-job-finished"));
+  } catch {
+    return false;
+  }
 }
 
 /** 等待页面中的视频/音频播放结束；暂停时按设置尝试恢复播放 */
@@ -496,31 +680,20 @@ export async function waitForMedia(
       cleanup();
       return "none";
     }
-    // 多视频/音频页面只跟踪主播放器，避免隐藏的预加载元素让等待永远不结束
+    // 多视频/音频页面：只跟踪“未完成任务点”的媒体，并按 DOM 顺序逐个等待，
+    // 避免主播放器启发式在多个媒体之间来回切换导致进度跳动。
     const connected = findMedia(doc).filter((element) => element.isConnected);
-    const primary = pickPrimaryMedia(connected);
+    const unfinished = connected.filter(
+      (element) => !isTaskPointFinished(element) && !isFinished(element),
+    );
+    if (unfinished.length === 0) {
+      cleanup();
+      return connected.length > 0 ? "done" : "none";
+    }
+    const primary = pickPrimaryMedia(unfinished);
     if (!primary) {
       cleanup();
       return "none";
-    }
-    if (isFinished(primary)) {
-      // 等一小段时间再确认：播放器可能在结束后自动播放下一个分段/重新循环
-      await sleep(1200);
-      if (!isAlive()) {
-        cleanup();
-        return "none";
-      }
-      const nextConnected = findMedia(doc).filter((element) => element.isConnected);
-      const nextPrimary = pickPrimaryMedia(nextConnected);
-      if (!nextPrimary) {
-        cleanup();
-        return "none";
-      }
-      if (isFinished(nextPrimary)) {
-        cleanup();
-        return "done";
-      }
-      continue;
     }
 
     const now = Date.now();

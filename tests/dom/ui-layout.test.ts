@@ -17,6 +17,7 @@ function makeState(patch: Partial<UiState> = {}): UiState {
       title: "测试作业",
       supported: true,
     },
+    verification: { detected: false, message: "" },
     frames: [],
     questions: [],
     results: {},
@@ -86,6 +87,23 @@ describe("导航与主页布局", () => {
     const tabs = Array.from(container.querySelectorAll(".sh-tab")).map((tab) => tab.textContent);
     expect(tabs).toEqual(["主页", "答题", "题库", "设置"]);
     expect(container.textContent).not.toContain("最近日志");
+  });
+
+  it("检测到平台人机验证时显示顶部提示条", () => {
+    const state = makeState({
+      verification: {
+        detected: true,
+        message: "平台返回【9010】操作异常，需要手动输入图片验证码",
+      },
+    });
+    state.settings.ui.collapsed = false;
+    const { controller } = makeController(state);
+    const container = mount(h(App, { controller }));
+
+    const banner = container.querySelector(".sh-verify");
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain("需要手动完成人机验证");
+    expect(banner?.textContent).toContain("9010");
   });
 
   it("主页自动翻页卡显示已翻页数和倍速选择，默认 1x", () => {

@@ -288,6 +288,41 @@
   scrollbar-color: var(--sh-border-strong) transparent;
 }
 
+.sh-verify {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(251, 191, 36, 0.38);
+  border-radius: 12px;
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--sh-text);
+}
+
+.sh-verify > svg {
+  flex: none;
+  margin-top: 1px;
+  color: #fbbf24;
+}
+
+.sh-verify__copy {
+  min-width: 0;
+}
+
+.sh-verify__title {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.sh-verify__desc {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--sh-muted);
+}
+
 .sh-content::-webkit-scrollbar {
   width: 8px;
 }

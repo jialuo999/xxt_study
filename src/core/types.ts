@@ -67,6 +67,12 @@ export interface MediaState {
   currentTaskFinished?: boolean;
   /** 当前页所有任务点是否都已完成 */
   allTasksFinished?: boolean;
+  /** 按 DOM 顺序看到的第一个未完成任务点的 iframe URL（内容 frame 上报） */
+  nextTaskUrl?: string;
+  /** 第一个未完成任务点的序号（从 0 开始） */
+  nextTaskIndex?: number;
+  /** 当前页任务点总数 */
+  taskTotal?: number;
 }
 
 /** 页面信息 */

@@ -52,6 +52,12 @@ export interface AiTestView {
   model?: string;
 }
 
+/** 平台人机验证（学习通【9010】）状态；只用于提示，不自动处理验证码 */
+export interface VerificationView {
+  detected: boolean;
+  message: string;
+}
+
 export interface ToastView {
   id: number;
   kind: "info" | "success" | "warn" | "error";
@@ -61,6 +67,7 @@ export interface ToastView {
 export interface UiState {
   ready: boolean;
   page: PageInfo;
+  verification: VerificationView;
   frames: FrameSummary[];
   questions: Question[];
   results: Record<string, SolveResult>;
