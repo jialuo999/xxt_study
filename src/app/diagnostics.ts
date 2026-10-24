@@ -157,6 +157,31 @@ const SELECTOR_GROUPS: readonly SelectorGroup[] = [
   { name: "章节 iframe", selectors: CHAPTER_IFRAME_SELECTORS },
   { name: "知识卡片", selectors: CARDS_MARKERS },
   { name: "章节标记", selectors: CHAPTER_MARKERS },
+  {
+    name: "章节树",
+    selectors: [
+      "#content1 #coursetree",
+      ".posCatalog_select",
+      ".posCatalog_active",
+      ".orangeNew",
+      ".icon_Completed",
+    ],
+  },
+  {
+    name: "任务点",
+    selectors: [".ans-attach-ct", ".ans-job-icon", ".ans-job-finished"],
+  },
+  {
+    name: "阅读/文档",
+    selectors: [
+      "#fileInfoNameInput",
+      ".fileBox",
+      "#panView",
+      "#ReadWeb",
+      "#img.imglook",
+      ".swiper-container",
+    ],
+  },
 ];
 
 function baseUrl(): string {
@@ -334,6 +359,7 @@ function sanitizeFrames(frames: readonly FrameSummary[]): FrameSummary[] {
     pageKind: frame.pageKind,
     questionCount: frame.questionCount,
     isTop: frame.isTop,
+    ...(frame.jobid ? { jobid: frame.jobid } : {}),
   }));
 }
 
@@ -341,6 +367,12 @@ function sanitizeMedia(media: MediaState | null): MediaState | null {
   if (!media) return null;
   const copy: MediaState = { ...media };
   if (typeof copy.nextTaskUrl === "string") copy.nextTaskUrl = sanitizeUrl(copy.nextTaskUrl);
+  if (Array.isArray(copy.tasks)) {
+    copy.tasks = copy.tasks.map((task) => ({
+      ...task,
+      ...(task.url ? { url: sanitizeUrl(task.url) } : {}),
+    }));
+  }
   return copy;
 }
 

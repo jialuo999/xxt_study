@@ -4,6 +4,7 @@ import { findUiHost, isTopFrame } from "./frames";
 import { HostController } from "./host";
 import { FrameAgent } from "./agent";
 import { startMediaPreferences } from "./media-preferences";
+import { startReaderAgent } from "./reader-agent";
 
 let booted = false;
 
@@ -17,11 +18,14 @@ export async function boot(): Promise<void> {
 
   // 每一帧都应用媒体偏好；跨域 iframe 由该 iframe 内的脚本自行处理
   const stopMediaPreferences = startMediaPreferences();
+  // 阅读/文档任务需要在每一层 iframe 中继，直到真正的文档页
+  const stopReaderAgent = startReaderAgent();
   window.addEventListener("pagehide", (event) => {
     // bfcache 只冻结页面，不能在这里销毁；否则退后恢复时媒体偏好失效
     if (event.persisted) return;
     try {
       stopMediaPreferences();
+      stopReaderAgent();
     } catch {
       /* ignore */
     }

@@ -56,6 +56,7 @@ import type {
 import { AutoTurnRunner } from "./autoturn";
 import {
   chapterIdFromUrl,
+  MEDIA_STATE_FRESH_MS,
   selectMediaPlaybackTarget,
   summarizeChildMediaState,
   taskUrlKey,
@@ -90,6 +91,9 @@ interface ChildFrame {
   title: string;
   pageKind: PageInfo["kind"];
   questions: Question[];
+  /** iframe data/jobid，同 URL 的多个任务点 frame 靠它区分 */
+  jobid?: string;
+  mid?: string;
   lastSeen: number;
 }
 
@@ -181,6 +185,7 @@ export class HostController implements UiController {
       getChildMediaState: () => this.getChildMediaState(),
       getMediaPlaybackTarget: () => this.getMediaPlaybackTarget(),
       activateMediaFrame: (frameId) => this.activateMediaFrame(frameId),
+      startReadingTask: (target) => this.startReadingTask(target),
       resumeChildMedia: () => this.resumeChildMedia(),
       pauseMedia: () => this.pauseMedia(),
       getTaskSignature: () => this.getTaskSignature(),
@@ -927,6 +932,7 @@ export class HostController implements UiController {
         pageKind: child.pageKind,
         questionCount: child.questions.length,
         isTop: false,
+        ...(child.jobid ? { jobid: child.jobid } : {}),
       });
     }
     return frames;
@@ -967,6 +973,8 @@ export class HostController implements UiController {
           title: message.title,
           pageKind: message.pageKind,
           questions: sameUrl ? existing!.questions : [],
+          ...(message.jobid ? { jobid: message.jobid } : {}),
+          ...(message.mid ? { mid: message.mid } : {}),
           lastSeen: Date.now(),
         });
         sendToWindow(source, createMessage({ t: "WELCOME", token, nonce: message.nonce }));
@@ -993,6 +1001,8 @@ export class HostController implements UiController {
         if (!child || child.token !== message.token) return;
         child.pageKind = message.pageKind;
         child.url = message.url;
+        if (message.jobid) child.jobid = message.jobid;
+        if (message.mid) child.mid = message.mid;
         child.lastSeen = Date.now();
         this.patch({ frames: this.buildFrames() });
         break;
@@ -1025,6 +1035,7 @@ export class HostController implements UiController {
         ) {
           return;
         }
+        child.lastSeen = Date.now();
         this.childMedia.set(message.frameId, { state, at: Date.now() });
         break;
       }
@@ -1154,9 +1165,38 @@ export class HostController implements UiController {
     return this.pinActiveMediaTarget(target);
   }
 
+  /** 最近一个带任务点快照的内容 frame；用于判断当前播放目标是否已完成 */
+  private latestTaskMediaState(): { frameId: string; state: MediaState } | null {
+    const now = Date.now();
+    const chapterId = this.currentChapterId();
+    let best: { frameId: string; state: MediaState; at: number } | null = null;
+    for (const [frameId, entry] of this.childMedia) {
+      if (now - entry.at >= MEDIA_STATE_FRESH_MS) continue;
+      const child = this.children.get(frameId);
+      if (!child) continue;
+      const state = entry.state;
+      if (
+        state.taskTotal === undefined &&
+        state.nextTaskUrl === undefined &&
+        state.allTasksFinished === undefined
+      ) {
+        continue;
+      }
+      if (chapterId) {
+        const stateChapter = state.chapterId || chapterIdFromUrl(child.url);
+        if (stateChapter && stateChapter !== chapterId) continue;
+      }
+      if (!best || entry.at > best.at) best = { frameId, state, at: entry.at };
+    }
+    return best ? { frameId: best.frameId, state: best.state } : null;
+  }
+
   /**
    * 当前目标还在播放且任务点未完成时，不因为任务点快照抖动而切走。
    * 媒体切换本身会暂停/恢复播放器，目标来回跳就是“切换抖动”的主要来源。
+   *
+   * 但如果任务点快照已经标记当前 iframe 对应任务完成（或当前 iframe 已不在
+   * 本章任务列表里），必须立即放开固定，否则会继续播已完成的媒体。
    */
   private pinActiveMediaTarget(
     target: MediaPlaybackTarget | null,
@@ -1165,10 +1205,27 @@ export class HostController implements UiController {
     if (!activeId) return target;
     const entry = this.childMedia.get(activeId);
     const child = this.children.get(activeId);
-    if (!entry || !child || Date.now() - entry.at >= 3500) return target;
+    if (!entry || !child || Date.now() - entry.at >= MEDIA_STATE_FRESH_MS) return target;
     const state = entry.state;
     if (!state.hasMedia || state.allEnded || state.currentTaskFinished) return target;
     if (target?.frameId === activeId) return target;
+
+    const taskState = this.latestTaskMediaState();
+    if (taskState && !taskState.state.allTasksFinished) {
+      const tasks = taskState.state.tasks ?? [];
+      if (tasks.length > 0) {
+        const activeKey = taskUrlKey(child.url);
+        const activeTask = tasks.find(
+          (task) =>
+            (child.jobid && task.jobid && task.jobid === child.jobid) ||
+            (task.url && taskUrlKey(task.url) === activeKey),
+        );
+        // 已完成的媒体 / 上一章节遗留的媒体都不再固定
+        if (activeTask?.finished) return target;
+        if (!activeTask) return target;
+      }
+    }
+
     // 当前视频还没播完/任务点没完成，先保持当前目标
     return {
       frameId: activeId,
@@ -1178,7 +1235,45 @@ export class HostController implements UiController {
       state,
       allTasksFinished: false,
       source: target?.source ?? "frames",
+      kind: target?.kind ?? "media",
+      taskId: target?.taskId,
+      taskName: target?.taskName,
+      ownerFrameId: target?.ownerFrameId,
     };
+  }
+
+  /**
+   * 请求内容 frame 完成阅读/文档/PPT 任务。
+   *
+   * 真正的文档 iframe（pan-yz / 课件模块）通常不会以子 frame 身份握手，因此
+   * 由持有任务点快照的内容 frame 找到附件 iframe，再逐层把 READER_TASK 转发
+   * 给文档页；文档页只做真实滚动/翻页，完成状态仍以平台任务点标记为准。
+   */
+  startReadingTask(target: MediaPlaybackTarget): void {
+    const ownerFrameId = target.ownerFrameId;
+    if (!ownerFrameId) return;
+    const owner = this.children.get(ownerFrameId);
+    if (!owner) {
+      logger.debug("reader", "阅读任务所属 frame 已断开", { ownerFrameId, taskId: target.taskId });
+      return;
+    }
+    sendToWindow(
+      owner.source,
+      createMessage({
+        t: "READER_TASK",
+        token: owner.token,
+        ...(target.taskId ? { jobid: target.taskId } : {}),
+        ...(target.taskUrl ? { url: target.taskUrl } : {}),
+        ...(target.kind ? { kind: target.kind } : {}),
+      }),
+    );
+    logger.info(
+      "reader",
+      `请求完成${target.kind === "doc" ? "文档" : target.kind === "ppt" ? "PPT" : "阅读"}任务：${
+        target.taskName || target.taskId || target.taskUrl || "当前任务点"
+      }`,
+      { ownerFrameId, taskIndex: target.taskIndex, taskTotal: target.taskTotal },
+    );
   }
 
   /**
@@ -1227,7 +1322,8 @@ export class HostController implements UiController {
    */
   getTaskSignature(): string {
     const frameKeys = this.state.frames.map(
-      (frame) => `${frame.pageKind}:${taskUrlKey(frame.url)}:${frame.title ?? ""}`,
+      (frame) =>
+        `${frame.pageKind}:${taskUrlKey(frame.url)}:${frame.jobid ?? ""}:${frame.title ?? ""}`,
     );
     const frames = [...new Set(frameKeys)].sort().join("|");
     let current = "";
@@ -1238,7 +1334,13 @@ export class HostController implements UiController {
     } catch {
       /* ignore */
     }
-    return `${taskUrlKey(location.href)}|${this.state.page.kind}|${current}|${frames}`;
+    let catalogActive = "";
+    try {
+      catalogActive = document.querySelector(".posCatalog_select.posCatalog_active")?.id ?? "";
+    } catch {
+      /* ignore */
+    }
+    return `${taskUrlKey(location.href)}|${this.state.page.kind}|${current}|${catalogActive}|${frames}`;
   }
 
   /**
@@ -1333,7 +1435,7 @@ export class HostController implements UiController {
     this.toast("warn", message);
   }
 
-  /** 停止自动翻页时暂停所有视频/音频 */
+  /** 停止自动翻页时暂停所有视频/音频，并让阅读任务停止滚动 */
   pauseMedia(): void {
     // 先挂起守卫，避免它把脚本刚暂停的视频又恢复。
     this.hostGuard?.suspend();
@@ -1347,6 +1449,14 @@ export class HostController implements UiController {
     }
     for (const child of this.children.values()) {
       sendToWindow(child.source, createMessage({ t: "PAUSE_MEDIA", token: child.token }));
+      sendToWindow(child.source, createMessage({ t: "READER_STOP", token: child.token }));
+    }
+  }
+
+  /** 停止所有阅读自动化（页面跳转/停止翻页时） */
+  private stopReaderTasks(): void {
+    for (const child of this.children.values()) {
+      sendToWindow(child.source, createMessage({ t: "READER_STOP", token: child.token }));
     }
   }
 
@@ -1361,6 +1471,7 @@ export class HostController implements UiController {
 
   private async onNavigation(): Promise<void> {
     logger.info("nav", `页面跳转：${location.pathname}`);
+    this.stopReaderTasks();
     this.detectPage();
     this.localQuestions = [];
     // 顶层 URL 变化后不要沿用旧章节的媒体/目标/题目状态；子 frame 会在 1 秒内重新上报。

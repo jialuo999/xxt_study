@@ -1,4 +1,12 @@
-import type { AnswerValue, FillResult, MediaState, PageKind, Question, SubmitResult } from "./types";
+import type {
+  AnswerValue,
+  FillResult,
+  MediaState,
+  PageKind,
+  Question,
+  SubmitResult,
+  TaskPointKind,
+} from "./types";
 
 export const MSG_MARK = "study-helper";
 export const MSG_VERSION = 1;
@@ -17,6 +25,9 @@ export type FrameMessage =
       pageKind: PageKind;
       /** 一次性随机数，由 Host 在 WELCOME 回显，避免任意父页面冒充 Host */
       nonce: string;
+      /** 当前 iframe 的 data/jobid，同 URL 的多个任务点 iframe 靠它区分 */
+      jobid?: string;
+      mid?: string;
     })
   | (BaseMessage & { t: "WELCOME"; token: string; nonce: string })
   | (BaseMessage & {
@@ -25,6 +36,9 @@ export type FrameMessage =
       frameId: string;
       url: string;
       pageKind: PageKind;
+      /** 当前 iframe 的 data/jobid，同 URL 的多个任务点 iframe 靠它区分 */
+      jobid?: string;
+      mid?: string;
     })
   | (BaseMessage & {
       t: "QUESTIONS";
@@ -57,7 +71,20 @@ export type FrameMessage =
   | (BaseMessage & { t: "NEXT"; token: string })
   | (BaseMessage & { t: "COLLECT"; token: string })
   | (BaseMessage & { t: "PING"; token: string })
-  | (BaseMessage & { t: "PONG"; token: string });
+  | (BaseMessage & { t: "PONG"; token: string })
+  /**
+   * 阅读/文档任务：Host 发送给内容 frame，再逐层转发给真正的文档 iframe。
+   * 转发后的消息不要求 token（嵌套 iframe 不在 Host 的 frame 表里），由
+   * reader-agent 校验来源域名后执行。
+   */
+  | (BaseMessage & {
+      t: "READER_TASK";
+      token?: string;
+      jobid?: string;
+      url?: string;
+      kind?: TaskPointKind;
+    })
+  | (BaseMessage & { t: "READER_STOP"; token?: string });
 
 /**
  * 分布式 Omit：直接 `Omit<联合类型, K>` 会退化成公共字段（只剩 t），
@@ -113,13 +140,18 @@ export function validateFrameMessage(data: unknown): FrameMessage | null {
       ) {
         return null;
       }
+      if (message.jobid !== undefined && !isString(message.jobid)) return null;
+      if (message.mid !== undefined && !isString(message.mid)) return null;
       return data;
     case "WELCOME":
       return isString(message.token) && isString(message.nonce) ? data : null;
     case "STATE":
-      return ["token", "frameId", "url", "pageKind"].every((key) => isString(message[key]))
-        ? data
-        : null;
+      if (!["token", "frameId", "url", "pageKind"].every((key) => isString(message[key]))) {
+        return null;
+      }
+      if (message.jobid !== undefined && !isString(message.jobid)) return null;
+      if (message.mid !== undefined && !isString(message.mid)) return null;
+      return data;
     case "QUESTIONS":
       if (
         !isString(message.token) ||
@@ -180,6 +212,15 @@ export function validateFrameMessage(data: unknown): FrameMessage | null {
         (message.level === "info" || message.level === "warn")
         ? data
         : null;
+    case "READER_TASK": {
+      if (message.token !== undefined && !isString(message.token)) return null;
+      if (message.jobid !== undefined && !isString(message.jobid)) return null;
+      if (message.url !== undefined && !isString(message.url)) return null;
+      if (message.kind !== undefined && !isString(message.kind)) return null;
+      return data;
+    }
+    case "READER_STOP":
+      return message.token === undefined || isString(message.token) ? data : null;
     case "RESUME_MEDIA":
     case "PAUSE_MEDIA":
     case "GUARD_START":

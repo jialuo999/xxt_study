@@ -58,6 +58,9 @@ export interface SolveResult {
   costTokens?: number;
 }
 
+/** 任务点类型（来自学习通 attachments.property.module / DOM 兜底） */
+export type TaskPointKind = "media" | "read" | "doc" | "ppt" | "quiz" | "link" | "unknown";
+
 /** 学习通任务点快照（用于跨 frame 跳过已完成任务） */
 export interface TaskPointInfo {
   /** 从 0 开始的 DOM 顺序 */
@@ -65,6 +68,12 @@ export interface TaskPointInfo {
   finished: boolean;
   /** 任务点 iframe 的绝对 URL；阅读类任务可能没有 */
   url?: string;
+  /** 任务点 id（学习通 jobid / _jobid） */
+  jobid?: string;
+  /** 任务点类型；用于区分视频、阅读、文档、PPT 等 */
+  kind?: TaskPointKind;
+  /** 任务点名称（来自 attachments.property.name） */
+  name?: string;
 }
 
 /** 媒体播放状态（跨 frame 汇总用） */
@@ -82,6 +91,12 @@ export interface MediaState {
   nextTaskUrl?: string;
   /** 第一个未完成任务点的序号（从 0 开始） */
   nextTaskIndex?: number;
+  /** 第一个未完成任务点的 jobid（阅读/文档任务可能没有 iframe） */
+  nextTaskId?: string;
+  /** 第一个未完成任务点的类型 */
+  nextTaskKind?: TaskPointKind;
+  /** 第一个未完成任务点的名称 */
+  nextTaskName?: string;
   /** 当前页任务点总数 */
   taskTotal?: number;
   /** 全部任务点快照；没有 nextTaskUrl 时也能判断哪些 iframe 已完成 */

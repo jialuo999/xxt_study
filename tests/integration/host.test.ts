@@ -285,6 +285,44 @@ describe("HostController 集成", () => {
     expect(host.getMediaPlaybackTarget()?.frameId).toBe("a");
     controller.dispose();
   });
+  it("阅读任务向内容 frame 下发 READER_TASK，由内容 frame 继续转发", async () => {
+    const { HostController } = await import("../../src/app/host");
+    const controller = new HostController();
+    const sent: Array<{ t?: string; jobid?: string; kind?: string }> = [];
+    (controller as unknown as { children: Map<string, unknown> }).children.set("cards", {
+      frameId: "cards",
+      source: {
+        closed: false,
+        postMessage: (message: { t?: string; jobid?: string; kind?: string }) => sent.push(message),
+      } as unknown as Window,
+      token: "token-cards",
+      nonce: "",
+      url: "https://x/knowledge/cards",
+      title: "",
+      pageKind: "cards",
+      questions: [],
+      lastSeen: Date.now(),
+    });
+
+    controller.startReadingTask({
+      frameId: null,
+      taskUrl: "https://x/pdf/index.html?jobid=job-doc",
+      taskIndex: 0,
+      taskTotal: 2,
+      state: null,
+      allTasksFinished: false,
+      source: "tasks",
+      kind: "doc",
+      taskId: "job-doc",
+      taskName: "阅读材料.pdf",
+      ownerFrameId: "cards",
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ t: "READER_TASK", jobid: "job-doc", kind: "doc" });
+    controller.dispose();
+  });
+
   it("切换播放目标时暂停旧目标、恢复新目标，不启动播放守卫", async () => {
     const { HostController } = await import("../../src/app/host");
     const controller = new HostController();

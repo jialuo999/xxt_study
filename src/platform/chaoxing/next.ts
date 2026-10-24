@@ -10,6 +10,7 @@ import type { NextResult } from "../../core/types";
 import type { PageContext } from "../types";
 import { clickElement, queryAll, queryFirst, textOf } from "../../utils/dom";
 import { NEXT_SELECTORS, NEXT_TEXT_KEYWORDS } from "./selectors";
+import { findNextPendingChapter, readCourseCatalog } from "./catalog";
 
 const MAX_NEXT_TEXT_LENGTH = 12;
 
@@ -73,6 +74,26 @@ function clickAndReport(
 
 export async function nextPage(ctx: PageContext): Promise<NextResult> {
   try {
+    // 优先走章节树：直接跳到当前章节之后第一个“未完成且有待完成任务点”的章节，
+    // 跳过整章已完成/无待完成的章节；点击仍交给原生 getTeacherAjax。
+    const nextChapter = findNextPendingChapter(ctx.doc);
+    if (nextChapter) {
+      const result = clickAndReport(
+        ctx,
+        nextChapter.target,
+        `catalog:${nextChapter.chapterId}`,
+        nextChapter.title,
+      );
+      if (result) return result;
+    } else if (readCourseCatalog(ctx.doc).length > 0) {
+      return {
+        ok: false,
+        action: "catalog-end",
+        message: "章节目录中没有待完成的章节",
+        url: currentUrl(ctx),
+      };
+    }
+
     for (const selector of NEXT_SELECTORS) {
       const element = queryFirst<HTMLElement>(ctx.doc, [selector]);
       if (!element || !isActionable(element) || wasAttempted(element)) continue;

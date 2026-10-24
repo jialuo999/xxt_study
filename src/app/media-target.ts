@@ -5,11 +5,12 @@
  * 便于用单测覆盖“同页多任务点 / 章节切换 / 旧 frame 残留”等边界。
  */
 
-import type { MediaState } from "@/core/types";
+import type { MediaState, TaskPointKind } from "@/core/types";
+import { isReadingTaskKind } from "./task-points";
 
 /** 学习通同页多任务点时的播放目标 */
 export interface MediaPlaybackTarget {
-  /** 匹配到的子 frame；null 表示任务点 iframe 尚未连接或全部完成 */
+  /** 匹配到的子 frame；null 表示任务点 iframe 尚未连接、阅读任务或全部完成 */
   frameId: string | null;
   taskUrl: string;
   taskIndex: number;
@@ -18,12 +19,23 @@ export interface MediaPlaybackTarget {
   allTasksFinished: boolean;
   /** tasks：按任务点 DOM 顺序；frames：任务点信息不足时按子 frame 连接顺序兜底 */
   source?: "tasks" | "frames";
+  /** 当前任务点类型（媒体/阅读/文档/PPT…） */
+  kind?: TaskPointKind;
+  /** 当前任务点 jobid，用于让内容 frame 找到对应附件 iframe */
+  taskId?: string;
+  /** 当前任务点名称 */
+  taskName?: string;
+  /** 上报任务点快照的内容 frame；阅读/文档任务由它转发滚动指令 */
+  ownerFrameId?: string;
 }
 
 export interface ChildFrameLike {
   frameId: string;
   url: string;
   lastSeen: number;
+  /** iframe data/jobid；同 URL 的多个视频 frame 靠它区分 */
+  jobid?: string;
+  mid?: string;
 }
 
 export interface ChildMediaEntry {
@@ -34,6 +46,7 @@ export interface ChildMediaEntry {
 const TASK_URL_KEYS = [
   "jobid",
   "jobId",
+  "_jobid",
   "knowledgeId",
   "knowledgeid",
   "chapterId",
@@ -67,6 +80,7 @@ export function taskKeyParam(url: URL): string {
     return (
       url.searchParams.get("jobid") ??
       url.searchParams.get("jobId") ??
+      url.searchParams.get("_jobid") ??
       url.searchParams.get("objectid") ??
       url.searchParams.get("objectId") ??
       ""
@@ -104,12 +118,24 @@ function isStateForChapter(
   return !fromUrl || fromUrl === chapterId;
 }
 
-/** 任务点 URL 与子 frame 的匹配：先完整 key，再 jobid/objectid 兜底 */
+/**
+ * 任务点 URL 与子 frame 的匹配：jobid（iframe data）优先，再完整 URL key，
+ * 最后 jobid/objectid 兜底。
+ *
+ * 学习通视频 iframe 的 URL 通常都是 `/ananas/modules/video/index.html`，同一页
+ * 多个任务点完全同 URL；此时只能靠 iframe 的 data/jobid 区分，否则会挑到
+ * “最近连接”的 frame，可能正好是已完成任务点。
+ */
 export function findChildForTask<T extends ChildFrameLike>(
   children: T[],
   taskUrl: string,
+  taskId?: string,
 ): T | null {
   const sorted = [...children].sort((a, b) => b.lastSeen - a.lastSeen);
+  if (taskId) {
+    const byJobId = sorted.find((child) => child.jobid === taskId);
+    if (byJobId) return byJobId;
+  }
   const targetKey = taskUrlKey(taskUrl);
   for (const child of sorted) {
     if (taskUrlKey(child.url) === targetKey) return child;
@@ -143,6 +169,8 @@ interface SelectTargetArgs {
 function fallbackMediaTarget(
   args: SelectTargetArgs,
   finishedTaskUrls: ReadonlySet<string> = new Set(),
+  knownTaskUrls: ReadonlySet<string> = new Set(),
+  knownTaskIds: ReadonlySet<string> = new Set(),
 ): MediaPlaybackTarget | null {
   const now = args.now ?? Date.now();
   const frames = args.children
@@ -154,7 +182,21 @@ function fallbackMediaTarget(
         if (!item.entry) return false;
         if (now - item.entry.at >= MEDIA_STATE_FRESH_MS) return false;
         if (!item.entry.state.hasMedia) return false;
-        if (finishedTaskUrls.has(taskUrlKey(item.child.url))) return false;
+        const key = taskUrlKey(item.child.url);
+        if (finishedTaskUrls.has(key)) return false;
+        // jobid 比 URL 可靠：多个视频 iframe 的 URL 完全相同。
+        if (knownTaskIds.size > 0) {
+          if (item.child.jobid) {
+            if (!knownTaskIds.has(item.child.jobid)) return false;
+          } else if (knownTaskUrls.size > 0 && !knownTaskUrls.has(key)) {
+            return false;
+          }
+        }
+        // 有任务点快照时只允许快照里出现过的 iframe，避免上一章节残留的
+        // video frame（没有 chapterId，无法靠章节过滤）被误选并重播。
+        if (knownTaskIds.size === 0 && knownTaskUrls.size > 0 && !knownTaskUrls.has(key)) {
+          return false;
+        }
         return isStateForChapter(item.entry.state, item.child.url, args.chapterId ?? "");
       },
     )
@@ -184,6 +226,7 @@ function fallbackMediaTarget(
     state: first.state,
     allTasksFinished: false,
     source: "frames",
+    kind: "media",
   };
 }
 
@@ -218,39 +261,114 @@ export function selectMediaPlaybackTarget(args: SelectTargetArgs): MediaPlayback
     .sort((a, b) => b[1].at - a[1].at)[0];
 
   if (taskEntry) {
-    const state = taskEntry[1].state;
+    const [ownerFrameId, entry] = taskEntry;
+    const state = entry.state;
+    const tasks = state.tasks ?? [];
     const finishedTaskUrls = new Set(
-      (state.tasks ?? [])
-        .filter((task) => task.finished && task.url)
-        .map((task) => taskUrlKey(task.url!)),
+      tasks.filter((task) => task.finished && task.url).map((task) => taskUrlKey(task.url!)),
     );
+    const knownTaskUrls = new Set(
+      tasks.filter((task) => task.url).map((task) => taskUrlKey(task.url!)),
+    );
+    const knownTaskIds = new Set(
+      tasks.filter((task) => task.jobid).map((task) => task.jobid!),
+    );
+    const nextTask =
+      state.nextTaskIndex !== undefined
+        ? tasks.find((task) => task.index === state.nextTaskIndex)
+        : undefined;
+    const kind = state.nextTaskKind ?? nextTask?.kind;
+    const taskId = state.nextTaskId ?? nextTask?.jobid;
+    const taskName = state.nextTaskName ?? nextTask?.name;
+    const taskTotal = state.taskTotal ?? tasks.length;
+
     if (state.allTasksFinished) {
       return {
         frameId: null,
         taskUrl: "",
         taskIndex: -1,
-        taskTotal: state.taskTotal ?? 0,
+        taskTotal,
         state: null,
         allTasksFinished: true,
         source: "tasks",
+        ownerFrameId,
       };
     }
-    const taskUrl = state.nextTaskUrl;
+
+    const taskUrl = state.nextTaskUrl ?? "";
     if (taskUrl) {
-      const child = findChildForTask(args.children, taskUrl);
+      const child = findChildForTask(args.children, taskUrl, taskId);
       if (child) {
         return {
           frameId: child.frameId,
           taskUrl,
           taskIndex: state.nextTaskIndex ?? 0,
-          taskTotal: state.taskTotal ?? 0,
+          taskTotal,
           state: args.childMedia.get(child.frameId)?.state ?? null,
           allTasksFinished: false,
           source: "tasks",
+          kind: kind ?? "media",
+          taskId,
+          taskName,
+          ownerFrameId,
         };
       }
+      if (isReadingTaskKind(kind)) {
+        // 阅读/文档 iframe 不一定会以子 frame 身份握手；保留任务目标，
+        // 让内容 frame 自己找到附件 iframe 并转发滚动指令。
+        return {
+          frameId: null,
+          taskUrl,
+          taskIndex: state.nextTaskIndex ?? 0,
+          taskTotal,
+          state: null,
+          allTasksFinished: false,
+          source: "tasks",
+          kind,
+          taskId,
+          taskName,
+          ownerFrameId,
+        };
+      }
+      // 只有当任务点本身没有 jobid（旧版页面）时才允许按 frame 兜底；
+      // 已知 jobid 时不能挑“任意未完成 frame”，否则会跳过前面的视频先播后面的。
+      if (!taskId) {
+        const fallback = fallbackMediaTarget(args, finishedTaskUrls, knownTaskUrls, knownTaskIds);
+        if (fallback) return fallback;
+      }
+      // 目标视频 frame 还没连接/握手：保留任务目标，让自动翻页等待而不是
+      // 直接回退到“无媒体等 3 秒”而跳过新章节的视频。
+      return {
+        frameId: null,
+        taskUrl,
+        taskIndex: state.nextTaskIndex ?? 0,
+        taskTotal,
+        state: null,
+        allTasksFinished: false,
+        source: "tasks",
+        kind: kind ?? "media",
+        taskId,
+        taskName,
+        ownerFrameId,
+      };
+    } else if (isReadingTaskKind(kind) || (taskId && !knownTaskUrls.size)) {
+      // 没有 iframe URL 的阅读任务（正文在内容 frame 内）/只有 jobid 的附件。
+      return {
+        frameId: null,
+        taskUrl: "",
+        taskIndex: state.nextTaskIndex ?? 0,
+        taskTotal,
+        state: null,
+        allTasksFinished: false,
+        source: "tasks",
+        kind,
+        taskId,
+        taskName,
+        ownerFrameId,
+      };
     }
-    return fallbackMediaTarget(args, finishedTaskUrls);
+
+    return fallbackMediaTarget(args, finishedTaskUrls, knownTaskUrls, knownTaskIds);
   }
 
   return fallbackMediaTarget(args);

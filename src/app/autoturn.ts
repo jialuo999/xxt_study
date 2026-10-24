@@ -6,12 +6,21 @@ import { logger } from "@/core/logger";
 import type { AutoTurnView } from "@/ui/contract";
 import { findMedia, waitForMedia, type MediaWaitResult } from "./media-wait";
 import { taskUrlKey, type MediaPlaybackTarget } from "./media-target";
+import { isReadingTaskKind } from "./task-points";
 
 export type { MediaPlaybackTarget } from "./media-target";
 
 const SESSION_KEY = "study-helper.autoturn.v1";
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const MEDIA_WAIT_TIMEOUT = 45 * 60 * 1000;
+/** 单篇阅读/文档任务最长等待时间；滚动完成后平台通常几秒内写回任务点状态 */
+const READING_WAIT_TIMEOUT = 10 * 60 * 1000;
+
+/** 当前目标是否是阅读/文档/PPT 任务（由内容 frame 转发滚动指令完成） */
+export function isReadingTarget(target: MediaPlaybackTarget | null): boolean {
+  if (!target || target.allTasksFinished) return false;
+  return isReadingTaskKind(target.kind);
+}
 
 interface AutoTurnSession {
   running: boolean;
@@ -31,6 +40,8 @@ export interface AutoTurnHost {
   getMediaPlaybackTarget(): MediaPlaybackTarget | null;
   /** 只恢复指定子 frame 的媒体，并暂停其他子 frame */
   activateMediaFrame(frameId: string): void;
+  /** 请求内容 frame 完成阅读/文档任务（目标可能没有可握手的子 frame） */
+  startReadingTask?(target: MediaPlaybackTarget): void;
   resumeChildMedia(): void;
   /** 停止翻页时暂停当前页面/子 frame 的视频与音频 */
   pauseMedia(): void;
@@ -200,7 +211,7 @@ export class AutoTurnRunner {
             return;
           }
           if (taskResult === "stalled") {
-            this.stop("视频已结束，但任务点未标记完成；请手动确认后再继续");
+            this.stop("任务点仍未标记完成（阅读/文档可能未滚动到底或视频未播完），已暂停");
             return;
           }
           if (taskResult === "done") mediaHandled = true;
@@ -422,12 +433,54 @@ export class AutoTurnRunner {
     let pendingSince = 0;
     let endedSince = 0;
     let noMediaSince = 0;
+    let readingKey = "";
+    let readingStarted = 0;
 
     while (Date.now() - started < MEDIA_WAIT_TIMEOUT) {
       if (!isAlive()) return "none";
       const target = this.host.getMediaPlaybackTarget();
       if (!target) return "none";
       if (target.allTasksFinished) return "done";
+
+      // 阅读/文档/PPT 任务：文档 iframe 往往不握手，由内容 frame 转发滚动指令；
+      // 完成状态仍以内容 frame 的任务点快照为准。
+      if (isReadingTarget(target)) {
+        if (!settings.autoTurn.readingAuto) {
+          logger.warn("autoturn", "检测到阅读/文档任务，但自动完成已关闭");
+          return "stalled";
+        }
+        const key = target.taskId || target.taskUrl || `task-${target.taskIndex}`;
+        if (key !== readingKey) {
+          readingKey = key;
+          readingStarted = Date.now();
+          if (lastFrameId) {
+            this.host.pauseMedia();
+            lastFrameId = "";
+          }
+          this.host.startReadingTask?.(target);
+          const label = target.taskTotal
+            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个任务点`
+            : "当前任务点";
+          this.emit(`正在完成阅读/文档任务（${label}）…`, false);
+          logger.info("autoturn", "开始完成阅读/文档任务", {
+            taskIndex: target.taskIndex,
+            taskTotal: target.taskTotal,
+            kind: target.kind,
+            taskId: target.taskId,
+            ownerFrameId: target.ownerFrameId,
+          });
+        }
+        if (Date.now() - readingStarted > READING_WAIT_TIMEOUT) {
+          logger.warn("autoturn", "阅读/文档任务等待超时，任务点仍未完成", {
+            taskIndex: target.taskIndex,
+            taskId: target.taskId,
+          });
+          return "stalled";
+        }
+        await sleep(500);
+        continue;
+      }
+      readingKey = "";
 
       if (!target.frameId) {
         if (!pendingSince) pendingSince = Date.now();
@@ -443,11 +496,13 @@ export class AutoTurnRunner {
       const state = target.state;
       if (!state) {
         if (!noMediaSince) noMediaSince = Date.now();
-        if (Date.now() - noMediaSince > 10000) {
-          logger.warn("autoturn", "任务点 iframe 未上报媒体，按已完成处理", {
+        // 不能按“已完成”处理：目标任务点还没完成，直接翻页会跳过未完成任务。
+        if (Date.now() - noMediaSince > 20000) {
+          logger.warn("autoturn", "任务点 iframe 长时间未上报媒体，暂停等待人工确认", {
             frameId: target.frameId,
+            kind: target.kind,
           });
-          return "done";
+          return "stalled";
         }
       } else {
         noMediaSince = 0;
@@ -474,10 +529,10 @@ export class AutoTurnRunner {
         lastFrameId = target.frameId;
         lastActivate = Date.now();
         this.host.activateMediaFrame(target.frameId);
-        const kind = target.source === "frames" ? "视频" : "任务点";
+        const kindLabel = target.source === "frames" ? "视频" : "任务点";
         const label = target.taskTotal
-          ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kind}`
-          : `第 ${target.taskIndex + 1} 个${kind}`;
+          ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kindLabel}`
+          : `第 ${target.taskIndex + 1} 个${kindLabel}`;
         this.emit(`开始播放${label}`, false);
         logger.info("autoturn", `开始播放${label}`, {
           frameId: target.frameId,

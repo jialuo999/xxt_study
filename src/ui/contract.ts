@@ -23,6 +23,8 @@ export interface FrameSummary {
   pageKind: PageInfo["kind"];
   questionCount: number;
   isTop: boolean;
+  /** 任务点 iframe 的 jobid，便于诊断同 URL 多 frame */
+  jobid?: string;
 }
 
 export interface AutoTurnView {

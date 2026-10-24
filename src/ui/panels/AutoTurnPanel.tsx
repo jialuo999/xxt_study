@@ -34,6 +34,13 @@ export function AutoTurnPanel({ controller, state }: Pick<PageProps, "controller
         description="刷新后继续上次进度"
       />
 
+      <Toggle
+        checked={autoTurn.readingAuto}
+        onChange={(readingAuto) => save({ autoTurn: { readingAuto } })}
+        label="自动完成阅读/文档任务"
+        description="真实滚动到文末/翻完最后一页，等待平台标记完成"
+      />
+
       <div class="sh-subhead">媒体播放</div>
       <Toggle
         checked={video.defaultMuted}

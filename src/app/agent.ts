@@ -138,6 +138,7 @@ export class FrameAgent {
 
   private sendHello(): void {
     const page = this.context?.page ?? UNKNOWN;
+    const meta = this.frameAttachmentMeta();
     sendToWindow(
       this.hostWindow,
       createMessage({
@@ -147,8 +148,48 @@ export class FrameAgent {
         title: document.title,
         pageKind: page.kind,
         nonce: this.nonce,
+        ...meta,
       }),
     );
+  }
+
+  /**
+   * 视频/文档 iframe 的 URL 往往相同（`/ananas/modules/video/index.html`），
+   * jobid 只存在于 iframe 的 `data` / 属性上。把它随 HELLO/STATE 报给 Host，
+   * 才能在同页多个任务点里精确找到当前该播放的那个 frame。
+   */
+  private frameAttachmentMeta(): { jobid?: string; mid?: string } {
+    try {
+      const frame = window.frameElement as HTMLIFrameElement | null;
+      if (!frame) return {};
+      const raw = frame.getAttribute("data");
+      let data: Record<string, unknown> | null = null;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            data = parsed as Record<string, unknown>;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const jobid =
+        frame.getAttribute("jobid")?.trim() ||
+        (data && typeof data.jobid === "string" ? data.jobid : "") ||
+        (data && typeof data._jobid === "string" ? data._jobid : "") ||
+        "";
+      const mid =
+        frame.getAttribute("mid")?.trim() ||
+        (data && typeof data.mid === "string" ? data.mid : "") ||
+        "";
+      return {
+        ...(jobid ? { jobid } : {}),
+        ...(mid ? { mid } : {}),
+      };
+    } catch {
+      return {};
+    }
   }
 
   private stopHello(): void {
@@ -429,6 +470,7 @@ export class FrameAgent {
           frameId: this.frameId,
           url: location.href,
           pageKind: page.kind,
+          ...this.frameAttachmentMeta(),
         }),
       );
       logger.debug("frame", `采集 ${questions.length} 题`);

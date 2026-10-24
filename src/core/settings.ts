@@ -45,6 +45,11 @@ export interface AutoTurnSettings {
   resumeOnReload: boolean;
   /** 页面没有 video/audio 时，等待多久再翻页（毫秒） */
   contentWaitMs: number;
+  /**
+   * 自动完成阅读/文档/PPT 任务：只做真实滚动/翻页，完成状态以平台任务点为准。
+   * 默认开启；关闭后阅读任务会停止并提示人工处理，不会 3 秒后直接跳过。
+   */
+  readingAuto: boolean;
 }
 
 export interface VideoSettings {
@@ -138,6 +143,7 @@ export const DEFAULT_SETTINGS: Settings = {
     startDelayMs: 1500,
     resumeOnReload: true,
     contentWaitMs: 3000,
+    readingAuto: true,
   },
   video: {
     defaultMuted: true,

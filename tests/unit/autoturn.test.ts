@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AutoTurnRunner, type AutoTurnHost, type MediaPlaybackTarget } from "../../src/app/autoturn";
+import {
+  AutoTurnRunner,
+  isReadingTarget,
+  type AutoTurnHost,
+  type MediaPlaybackTarget,
+} from "../../src/app/autoturn";
 import { DEFAULT_SETTINGS } from "../../src/core/settings";
 import { replaceSettings, updateSettings } from "../../src/core/settings-store";
 import type { PageInfo } from "../../src/core/types";
@@ -237,6 +242,78 @@ describe("AutoTurnRunner 翻页校验", () => {
     expect(host.nextPage).toHaveBeenCalledTimes(3);
     expect(host.stopped.some((reason) => reason.includes("未找到"))).toBe(true);
     expect(runner.isRunning).toBe(false);
+  });
+
+  it("阅读/文档任务通过内容 frame 转发滚动，任务完成后才翻页", async () => {
+    updateSettings({ autoTurn: { maxSteps: 1 } });
+    let signature = "reading-1";
+    const host = makeHost({
+      signature: () => signature,
+      onChangeSignature: () => {
+        signature = "reading-2";
+      },
+    });
+    let target: MediaPlaybackTarget = {
+      frameId: null,
+      taskUrl: "https://mooc1.chaoxing.com/ananas/modules/pdf/index.html?jobid=doc-1",
+      taskIndex: 0,
+      taskTotal: 2,
+      state: null,
+      allTasksFinished: false,
+      source: "tasks",
+      kind: "doc",
+      taskId: "doc-1",
+      taskName: "阅读材料.pdf",
+      ownerFrameId: "cards",
+    };
+    const started: string[] = [];
+    host.getMediaPlaybackTarget = () => target;
+    host.startReadingTask = (readingTarget) => {
+      started.push(readingTarget.taskId ?? "");
+    };
+
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(isReadingTarget(target)).toBe(true);
+    expect(started).toEqual(["doc-1"]);
+    expect(host.nextPage).not.toHaveBeenCalled();
+
+    target = {
+      ...target,
+      frameId: null,
+      taskUrl: "",
+      taskIndex: -1,
+      state: null,
+      allTasksFinished: true,
+    };
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(host.nextPage).toHaveBeenCalledTimes(1);
+    runner.stop("测试结束");
+  });
+
+  it("阅读任务未完成时不会因为 10 秒无媒体而误判完成", async () => {
+    const host = makeHost({ signature: () => "reading-unfinished" });
+    host.getMediaPlaybackTarget = () => ({
+      frameId: null,
+      taskUrl: "https://mooc1.chaoxing.com/ananas/modules/pdf/index.html?jobid=doc-1",
+      taskIndex: 0,
+      taskTotal: 1,
+      state: null,
+      allTasksFinished: false,
+      source: "tasks",
+      kind: "doc",
+      taskId: "doc-1",
+      ownerFrameId: "cards",
+    });
+    host.startReadingTask = () => undefined;
+    const runner = new AutoTurnRunner(host);
+    runner.start();
+    await vi.advanceTimersByTimeAsync(15000);
+
+    expect(host.nextPage).not.toHaveBeenCalled();
+    expect(runner.isRunning).toBe(true);
+    runner.stop("测试结束");
   });
 
   it("当前任务点未完成时不会跳过视频等待", async () => {

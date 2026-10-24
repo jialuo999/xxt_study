@@ -44,6 +44,17 @@ describe("media-target", () => {
     expect(chapterIdFromUrl("https://x/y")).toBe("");
   });
 
+  it("findChildForTask 优先用 iframe jobid 区分同 URL 的多个视频任务点", () => {
+    const children = [
+      { ...child("a", "https://x/ananas/modules/video/index.html"), jobid: "job-1", lastSeen: 2000 },
+      { ...child("b", "https://x/ananas/modules/video/index.html"), jobid: "job-2", lastSeen: 1000 },
+    ];
+    // 两个 frame URL 完全相同，只能靠 jobid 选中未完成的 job-2（b）
+    expect(
+      findChildForTask(children, "https://x/ananas/modules/video/index.html", "job-2")?.frameId,
+    ).toBe("b");
+  });
+
   it("findChildForTask 先按完整 key 匹配，再按 jobid 兜底", () => {
     const children = [
       child("a", "https://x/video?jobid=job-1&knowledgeId=k-1"),
@@ -151,6 +162,71 @@ describe("media-target", () => {
       children,
       childMedia,
       chapterId: "",
+      now: 2500,
+    });
+    expect(target?.source).toBe("frames");
+    expect(target?.frameId).toBe("b");
+  });
+
+  it("阅读/文档任务没有可握手子 frame 时仍返回任务目标，交给内容 frame 转发", () => {
+    const children = [child("a", "https://x/content?knowledgeId=k-1")];
+    const childMedia = new Map([
+      [
+        "a",
+        mediaEntry(
+          state({
+            hasMedia: false,
+            taskTotal: 2,
+            nextTaskUrl: "https://x/pdf/index.html?jobid=doc-1",
+            nextTaskIndex: 0,
+            nextTaskId: "doc-1",
+            nextTaskKind: "doc",
+            tasks: [
+              {
+                index: 0,
+                finished: false,
+                url: "https://x/pdf/index.html?jobid=doc-1",
+                jobid: "doc-1",
+                kind: "doc",
+              },
+              { index: 1, finished: false, url: "https://x/video?jobid=2", jobid: "2", kind: "media" },
+            ],
+          }),
+        ),
+      ],
+    ]);
+    const target = selectMediaPlaybackTarget({
+      children,
+      childMedia,
+      chapterId: "k-1",
+      now: 2000,
+    });
+    expect(target?.source).toBe("tasks");
+    expect(target?.frameId).toBeNull();
+    expect(target?.kind).toBe("doc");
+    expect(target?.taskId).toBe("doc-1");
+    expect(target?.ownerFrameId).toBe("a");
+    expect(target?.allTasksFinished).toBe(false);
+  });
+
+  it("有任务点快照时兜底不选上一章节遗留的 iframe", () => {
+    const children = [
+      child("stale", "https://x/video?jobid=old"),
+      child("a", "https://x/content?knowledgeId=k-1"),
+      child("b", "https://x/video?jobid=2"),
+    ];
+    const childMedia = new Map([
+      ["stale", mediaEntry(state({ hasMedia: true }), 2000)],
+      ["a", mediaEntry(state({ hasMedia: false, taskTotal: 2, nextTaskUrl: "https://x/video?jobid=missing", tasks: [
+        { index: 0, finished: false, url: "https://x/video?jobid=1" },
+        { index: 1, finished: false, url: "https://x/video?jobid=2" },
+      ] }), 2000)],
+      ["b", mediaEntry(state({ hasMedia: true }), 2000)],
+    ]);
+    const target = selectMediaPlaybackTarget({
+      children,
+      childMedia,
+      chapterId: "k-1",
       now: 2500,
     });
     expect(target?.source).toBe("frames");

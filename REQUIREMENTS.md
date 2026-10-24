@@ -51,18 +51,42 @@
 5. 全部任务点完成/没有媒体后才翻页；
 6. **切换任务点时视频不抖动**：不能高频 `play()/pause()`、不能 `video.click()`、不能目标 frame 来回跳；
 7. 任务点信息缺失/iframe URL 匹配失败时，按子 frame 顺序兜底，仍不能一起播放；
-8. 阅读类任务点没有媒体时不能卡死，也不能把后面的视频顺序打乱。
+8. 阅读类任务点没有媒体时不能卡死，也不能把后面的视频顺序打乱；
+9. **优先用权威任务点数据**：知识卡片页的 `window.mArg.attachments` / `window.attachments`，按 iframe `data` 的 `jobid`/`_jobid`/`mid` 对齐，读取 `job`/`isPassed`/`property.module`；DOM `.ans-attach-ct` + `.ans-job-finished` 与 `.ans-job-icon` 只做兜底；
+10. **跳过上一章节残留 frame**：只看当前任务点快照里出现过的 iframe，已完成的 iframe 不再激活/恢复；
+11. **阅读/文档任务不能被 3 秒默认等待跳过**：识别到 `insertdoc`/`insertbook`/`insertflash` 时必须进入阅读等待分支。
 
 实现：
 
-- `src/app/task-points.ts`：解析 `.ans-job-icon`，兼容完成标记在 icon/父级/任务项内部，返回全部任务点快照；
-- `src/app/agent.ts`：把 `tasks`、`nextTaskUrl`、`taskFinished` 随 `MEDIA_STATE` 上报；
-- `src/app/media-target.ts`：按任务点顺序选目标；兜底按 `children` 顺序；用 `tasks` 快照跳过已完成 iframe；
-- `src/app/autoturn.ts`：`waitForTaskMedia` 按目标播放，目标不变不重复 `RESUME`，暂停重试限频；
-- `src/app/host.ts`：`pinActiveMediaTarget` 在当前视频未播完时固定目标，避免任务快照抖动导致来回切；
+- `src/app/task-points.ts`：优先解析 `attachments`（job/isPassed/module），再解析 `.ans-attach-ct` + iframe data，最后 `.ans-job-icon` 兜底；输出 `tasks`、`nextTaskUrl`、`nextTaskId`、`nextTaskKind`、`nextTaskName`；
+- `src/app/agent.ts`：把任务点快照随 `MEDIA_STATE` 上报；
+- `src/app/media-target.ts`：按任务点顺序选目标；阅读任务没有可握手 iframe 时返回 `ownerFrameId`；兜底按 `children` 顺序且只允许当前任务点快照中的 URL；
+- `src/app/autoturn.ts`：`waitForTaskMedia` 按目标播放/阅读，目标不变不重复 `RESUME` 或重复下发阅读指令，暂停重试限频；阅读任务未完成时不会 10 秒后误判完成；
+- `src/app/host.ts`：`pinActiveMediaTarget` 在当前视频未播完且任务点未完成时固定目标；任务点已完成或已不在当前快照时立即放开；
 - `src/app/media-wait.ts`：同文档多媒体跳过已完成任务点，只等待未完成媒体。
 
 对应测试：`tests/unit/task-points.test.ts`、`tests/unit/media-target.test.ts`、`tests/unit/media-wait.test.ts`、`tests/unit/autoturn.test.ts`。
+
+### R4.1. 章节树跳转与跳过已完成章节（已实现）
+
+用户原话：“跳转功能还有问题，跳过已完成……就是下一个如果已完成就跳过，否则继续播放。”
+
+- 从 `#content1 #coursetree` 读取 `.posCatalog_select`，按 `.orangeNew`（待完成数）和 `.icon_Completed`（已完成）判断；
+- 当前章节完成后，直接点击下一个「未完成且待完成数 > 0」的章节原生入口；
+- 整章已完成 / `.orangeNew=0` 的章节跳过，不进去空等；
+- 目录不可用时回退原「下一节」按钮；目录没有待完成章节时明确返回 `catalog-end` 并停止。
+
+实现：`src/platform/chaoxing/catalog.ts`、`src/platform/chaoxing/next.ts`；测试 `tests/unit/catalog.test.ts`。
+
+### R4.2. 阅读/PDF/文档/PPT 任务自动完成（已实现，默认开启）
+
+- 识别 `insertdoc` / `insertbook` / `insertflash` 任务点；
+- 文档 iframe 不握手时，Host → 内容 frame → 文档模块 → 文档页逐层转发 `READER_TASK`；
+- 只做真实滚动到文末/翻完最后一页（`#fileInfoNameInput` / `.fileBox` / `#panView` / `#ReadWeb` / `.swiper-container`），完成状态由平台写回；
+- 不调用平台完成任务接口、不伪造进度、不碰验证码；
+- 可在「主页 → 自动翻页设置」关闭；关闭后遇到阅读任务会暂停并提示人工完成。
+
+实现：`src/app/reader-agent.ts`、`src/app/autoturn.ts`、`src/app/host.ts`、`src/core/messages.ts`、`src/ui/panels/AutoTurnPanel.tsx`；测试 `tests/unit/reader-agent.test.ts`、`tests/unit/autoturn.test.ts`。
 
 ### R5. 视频/音频行为（已实现）
 
@@ -100,6 +124,9 @@
 - [ ] R4.3 同一时间只播一个
 - [ ] R4.4 播完且任务点完成才切
 - [ ] R4.6 切换不抖动（无高频 play/pause、无 click、目标不来回跳）
+- [ ] R4.9 优先用 attachments 判断任务点完成
+- [ ] R4.1 章节树跳过已完成/无待完成章节
+- [ ] R4.2 阅读/文档任务不会 3 秒后直接跳过
 - [ ] R3 正常页面不误报验证码
 - [ ] R6 手动填写/仅提示/复核提交
 - [ ] typecheck + test + build
@@ -107,5 +134,7 @@
 ## 已知限制
 
 - closed Shadow DOM / Canvas 播放器无法读取媒体元素；
-- 任务点完成标记依赖学习通 `.ans-job-finished`，平台改 DOM 需要同步调整；
+- 任务点完成标记依赖学习通 `attachments` 与 `.ans-job-finished`，平台改 DOM 需要同步调整；
+- 阅读/文档自动完成依赖页面真实结构（`#fileInfoNameInput` / `#panView` / `#ReadWeb` / `.swiper-container`），无法识别的第三方阅读器只记录日志并等待人工；
+- 章节树跳转依赖 `#content1 #coursetree`；平台改版时回退「下一节」；
 - 真实页面回归样本有限，媒体切换抖动需要实机日志确认目标是否来回变化。
