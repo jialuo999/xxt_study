@@ -256,6 +256,9 @@ export function startReaderAgent(): () => void {
   const onMessage = (event: MessageEvent): void => {
     if (disposed) return;
     if (!isTrustedOrigin(event.origin)) return;
+    // 只接受父级/顶层 frame 下发的阅读指令，避免同源第三方脚本随意驱动滚动。
+    const source = event.source as Window | null;
+    if (source && source !== window.parent && source !== window.top) return;
     const message = event.data;
     if (!isFrameMessage(message)) return;
     if (!isReaderTaskMessage(message)) return;
