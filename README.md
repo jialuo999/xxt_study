@@ -1,43 +1,37 @@
-**English** | [简体中文](README.zh-CN.md)
+# Xxt Study
 
-# Study Helper · 学习助手
+为学习平台页面提供 **自动翻页**、**题目识别与作答**、**本地题库检索**、**AI 解题**。
 
-Brings **automatic page turning**, **question recognition and answering**, **local question-bank lookup**, and **AI solving** to study-platform pages.
+## 功能
 
-![Panel preview](dev/preview.png)
+- **自动翻页**
 
-## Features
+- **章节树跳转**
 
-- **Automatic page turning**
+- **多任务点顺序播放**
 
-- **Chapter tree navigation**
+- **阅读/PDF/文档/PPT 任务**
 
-- **Sequential playback of multiple task points**
+- **字体反爬解码**
 
-- **Reading / PDF / document / PPT tasks**
+- **本地题库匹配**
 
-- **Font-based anti-scraping decoding**
+- **AI 解题**（需用户自行接入api）
 
-- **Local question-bank matching**
-
-- **AI solving** (requires you to connect your own API)
-
-- **UI language**: Chinese / English, follows the browser language by default.
-
-## Installation
+## 安装
 
 ```bash
 npm install
 npm run build
 ```
 
-Build output: `dist/study-helper.user.js`.
+构建产物：`dist/study-helper.user.js`。
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/).
-2. Open the Tampermonkey dashboard → Utilities → Import from file, and select `dist/study-helper.user.js`.
-3. Open a Chaoxing (学习通) page; a floating ball appears in the bottom-right corner. Click it or press `Alt+Shift+S` to expand the panel.
+1. 安装 [Tampermonkey](https://www.tampermonkey.net/)
+2. 打开 Tampermonkey 管理面板 → 实用工具 → 从文件导入 `dist/study-helper.user.js`。
+3. 打开学习通页面，右下角出现悬浮球；点击或按 `Alt+Shift+S` 展开。
 
-Development and debugging:
+开发调试：
 
 ```bash
 npm run dev          # Vite 开发服务器 + 用户脚本注入
@@ -46,11 +40,11 @@ npm run test:sandbox # 受限 Windows 沙箱内的测试 workaround
 npm run typecheck    # TypeScript
 ```
 
-After building, open `dev/preview.html` to view the local mock assignment page and the floating panel (just open it via `file://`; no real account is required).
+构建后可打开 `dev/preview.html` 查看本地模拟作业页与悬浮面板（直接以 `file://` 打开即可，不需要真实账号）。 
 
-## Question bank
+## 题库
 
-See [`examples/questions.sample.csv`](examples/questions.sample.csv) for an example.
+示例见 [`examples/questions.sample.csv`](examples/questions.sample.csv)。
 
 ##### CSV / TSV
 
@@ -62,7 +56,7 @@ judge,地球是圆的。,正确,错误,,,对,自建题库
 fill,中国的首都是____。,北京,,,,,北京,自建题库
 ```
 
-Generic columns are also supported:
+也支持通用列：
 
 ```csv
 type,question,options,answer,source
@@ -90,20 +84,20 @@ single,下列哪个是质数？,"2|4|6|8",A,自建题库
 
 ##### TXT
 
-One question per line: `question<TAB>answer` or `question==answer`.
+每行 `题干<TAB>答案` 或 `题干==答案`。
 
-##### Answer formats
+##### 答案写法
 
-- Choice questions: `A`, `AC`, `A,C`, `A、C`, or the full option text;
-- True/false questions: `对/错`, `正确/错误`, `√/×`, `T/F`, `true/false`;
-- Fill-in-the-blank questions: separate multiple blanks with `|`, `；`, `;`, or newlines;
-- Short-answer questions: just write the text.
+- 选择题：`A`、`AC`、`A,C`、`A、C`，或选项全文；
+- 判断题：`对/错`、`正确/错误`、`√/×`、`T/F`、`true/false`；
+- 填空题：多个空用 `|`、`；`、`;` 或换行分隔；
+- 简答题：直接写文本。
 
-For `.xlsx` files, save the sheet as CSV (UTF-8) first.
+`.xlsx` 请先另存为 CSV（UTF-8）。
 
-#### Remote question bank
+#### 远程题库
 
-Once enabled under **Question bank → Bank settings**, the script sends the following to the configured URL:
+在 **题库 → 题库设置** 中启用后，脚本会向配置的 URL 发送：
 
 ```json
 {
@@ -113,32 +107,32 @@ Once enabled under **Question bank → Bank settings**, the script sends the fol
 }
 ```
 
-Expected response:
+期望响应：
 
 ```json
 { "answer": ["A"], "confidence": 0.92 }
 ```
 
-`answerPath` / `confidencePath` support dot paths (e.g. `data.answer`). No third-party question-bank keys are bundled; if the request fails, the script automatically falls back to AI.
+`answerPath` / `confidencePath` 支持点路径（如 `data.answer`）。没有内置任何第三方题库密钥；接口失败会自动回退 AI。
 
-## Supported pages
+## 支持的页面
 
-| Page | Capability |
+| 页面                                      | 能力                  |
 | --------------------------------------- | ------------------- |
-| `/mycourse/studentstudy` chapter study | Automatic page turning, resume |
-| `/knowledge/cards` knowledge cards | In-card paging, wait for video, skip completed task points |
-| `ananas/modules/video/` video | Wait for playback to finish |
-| `pan-yz.chaoxing.com/screen/...` document preview | Auto-scroll to the end (reading / document task points) |
-| `ananas/modules/pdf/`, `/readsvr/` document / reading | Auto-scroll / page turning (when a task point is detected) |
-| `/work/doHomeWorkNew` and other assignment pages | Collect, fill in, submit |
-| `/exam-ans/exam/test/...` exam | Collect / fill in / submit (disabled by default) |
+| `/mycourse/studentstudy` 章节学习           | 自动翻页、恢复             |
+| `/knowledge/cards` 知识卡片                 | 卡片内翻页、视频等待、任务点跳过已完成 |
+| `ananas/modules/video/` 视频              | 等待播放结束              |
+| `pan-yz.chaoxing.com/screen/...` 文档预览   | 自动滚动到文末（阅读/文档任务点）   |
+| `ananas/modules/pdf/`、`/readsvr/` 文档/阅读 | 自动滚动/翻页（能识别到任务点时）   |
+| `/work/doHomeWorkNew` 等作业页              | 采集、填答、提交            |
+| `/exam-ans/exam/test/...` 考试            | 采集/填答/提交（默认禁用）      |
 
-## Adding other platforms
+## 接入其他平台
 
-The first version's `@match` covers Chaoxing (学习通) only. To support another platform:
+首版 `@match` 只包含学习通。若要适配其他平台：
 
-1. Add the target domain (e.g. `*://*.example.com/*`) to `userscript.match` in `vite.config.ts`, then rebuild and reinstall.
-2. In the panel, open **Settings → Advanced & generic adapter** and enter the selector JSON, for example:
+1. 在 `vite.config.ts` 的 `userscript.match` 里加入目标域名（例如 `*://*.example.com/*`），重新构建并安装；
+2. 在面板 **设置 → 高级与通用适配器** 填入选择器 JSON，例如：
 
 ```json
 {
@@ -153,18 +147,14 @@ The first version's `@match` covers Chaoxing (学习通) only. To support anothe
 }
 ```
 
-3. Save and refresh the page. The generic adapter is experimental; for complex pages, implementing a dedicated `PlatformAdapter` is still recommended.
+3. 保存后刷新页面。通用适配器是实验性能力，复杂页面仍建议实现专用 `PlatformAdapter`。
 
-## About
+## 许可与致谢
 
-Developed by jialuo · https://github.com/jialuo999/xxt_study
+本项目以 MIT 许可发布，详见 [LICENSE](LICENSE)。选择器与页面结构参考了 MIT 项目 [CodFrm/cxmooc-tools](https://github.com/CodFrm/cxmooc-tools)，完整出处与许可文本见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-## License and acknowledgments
-
-This project is released under the MIT License; see [LICENSE](LICENSE). The selectors and page structures take inspiration from the MIT-licensed project [CodFrm/cxmooc-tools](https://github.com/CodFrm/cxmooc-tools); full attribution and license texts are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Feature inspiration from other projects is used for product design only; the concrete list and license status are likewise recorded in THIRD_PARTY_NOTICES.md.
+其他项目的功能灵感仅用于产品设计，具体列表与许可状态同样记录在 THIRD_PARTY_NOTICES.md。
 
 ---
 
-**Disclaimer**: This tool is intended only for personal study assistance and automation-efficiency research. Any consequences for grades, accounts, academic integrity, or platform rules caused by using this tool are borne by the user. Do not use it for exam proxy, course farming, falsifying study records, or any other rule-violating purpose.
+**免责声明**：本工具仅供个人学习辅助与自动化效率研究。使用本工具造成的成绩、账号、学术诚信或平台规则后果由使用者自行承担。请勿用于代考、刷课、伪造学习记录或任何违规用途。
