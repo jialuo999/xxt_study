@@ -18,6 +18,8 @@
  *   stop / pagehide / dispose 时调用，便于单测用可控的 `now` 验证过期逻辑。
  */
 
+import { t } from "@/core/i18n";
+
 /** 锁 key 前缀，避免与设置、题库等存储键冲突 */
 const STORAGE_PREFIX = "study-helper.tab-lock.v1";
 
@@ -40,12 +42,10 @@ export interface TabLockInfo {
 /** 抢锁结果：成功或返回当前持有者信息 */
 export type AcquireTabLockResult = { ok: true } | { ok: false; holder: TabLockInfo };
 
-/** 写失败且没有任何持有者信息时使用的占位 holder */
-const STORAGE_UNAVAILABLE_HOLDER: TabLockInfo = {
-  tabId: "",
-  heartbeatAt: 0,
-  label: "浏览器存储不可用",
-};
+/** 写失败且没有任何持有者信息时使用的占位 holder（文案在读取时本地化） */
+function storageUnavailableHolder(): TabLockInfo {
+  return { tabId: "", heartbeatAt: 0, label: t("lock.storageUnavailable") };
+}
 
 function getStorage(): Storage | null {
   try {
@@ -180,7 +180,7 @@ export function acquireLock(
 
   const info: TabLockInfo = { tabId, heartbeatAt: now, label };
   if (!writeLock(key, info)) {
-    return { ok: false, holder: current ?? STORAGE_UNAVAILABLE_HOLDER };
+    return { ok: false, holder: current ?? storageUnavailableHolder() };
   }
   return { ok: true };
 }

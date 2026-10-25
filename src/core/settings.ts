@@ -1,3 +1,4 @@
+import type { Language } from "./i18n";
 import type { PageKind, QuestionType } from "./types";
 
 export type ThemeMode = "auto" | "light" | "dark";
@@ -74,6 +75,8 @@ export interface SolvingSettings {
 
 export interface UiSettings {
   theme: ThemeMode;
+  /** 面板界面语言；auto 跟随浏览器 */
+  language: Language;
   hotkey: string;
   collapsed: boolean;
   x: number;
@@ -125,6 +128,7 @@ export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   ui: {
     theme: "auto",
+    language: "auto",
     hotkey: "Alt+Shift+S",
     collapsed: true,
     x: -1,
@@ -218,11 +222,13 @@ export const QUESTION_TYPE_LABEL: Record<QuestionType, string> = {
   unknown: "未知题型",
 };
 
-export const AI_PRESETS: Array<{ label: string; baseUrl: string; model: string }> = [
-  { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-  { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  { label: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3" },
-  { label: "自定义", baseUrl: "", model: "" },
+export type AiPresetId = "deepseek" | "openai" | "siliconflow" | "custom";
+
+export const AI_PRESETS: Array<{ id: AiPresetId; baseUrl: string; model: string }> = [
+  { id: "deepseek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { id: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  { id: "siliconflow", baseUrl: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3" },
+  { id: "custom", baseUrl: "", model: "" },
 ];
 
 export const VIDEO_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;

@@ -1,4 +1,5 @@
 import { useState } from "preact/hooks";
+import { t } from "@/core/i18n";
 import { Button, EmptyState, Modal, Segmented } from "@/ui/components";
 import { downloadText, formatDateTime } from "@/ui/tabs";
 import type { LogLevel } from "@/core/logger";
@@ -23,7 +24,7 @@ export function LogsPanel({ controller, state }: Pick<PageProps, "controller" | 
   return (
     <div class="sh-stack" style="gap:8px">
       <div class="sh-row sh-row--between">
-        <span class="sh-small sh-faint">{state.logs.length} 条记录</span>
+        <span class="sh-small sh-faint">{t("common.recordCount", { count: state.logs.length })}</span>
         <div class="sh-actions">
           <Button
             size="sm"
@@ -36,13 +37,13 @@ export function LogsPanel({ controller, state }: Pick<PageProps, "controller" | 
               )
             }
           >
-            导出
+            {t("logs.export")}
           </Button>
           <Button size="sm" icon="copy" onClick={() => void copyAll()}>
-            复制
+            {t("logs.copy")}
           </Button>
           <Button size="sm" variant="ghost" icon="trash" onClick={() => setConfirmClear(true)}>
-            清空
+            {t("logs.clear")}
           </Button>
         </div>
       </div>
@@ -51,16 +52,20 @@ export function LogsPanel({ controller, state }: Pick<PageProps, "controller" | 
         value={filter}
         onChange={setFilter}
         options={[
-          { value: "all", label: "全部" },
-          { value: "info", label: "信息" },
-          { value: "warn", label: "警告" },
-          { value: "error", label: "错误" },
-          { value: "debug", label: "调试" },
+          { value: "all", label: t("logs.filter.all") },
+          { value: "info", label: t("logs.filter.info") },
+          { value: "warn", label: t("logs.filter.warn") },
+          { value: "error", label: t("logs.filter.error") },
+          { value: "debug", label: t("logs.filter.debug") },
         ]}
       />
 
       {visible.length === 0 ? (
-        <EmptyState icon="bug" title="没有日志" description="操作、AI 请求与错误信息会记录在这里。" />
+        <EmptyState
+          icon="bug"
+          title={t("logs.emptyTitle")}
+          description={t("logs.emptyDesc")}
+        />
       ) : (
         <div class="sh-stack" style="gap:2px">
           {visible.map((entry) => (
@@ -76,17 +81,17 @@ export function LogsPanel({ controller, state }: Pick<PageProps, "controller" | 
       )}
 
       <div class="sh-hint" style="text-align:center;padding:2px 0 2px">
-        日志最多保留 500 条
+        {t("logs.limit")}
       </div>
 
       <Modal
         open={confirmClear}
-        title="清空运行日志？"
+        title={t("logs.clearTitle")}
         onClose={() => setConfirmClear(false)}
         actions={
           <>
             <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               size="sm"
@@ -96,12 +101,12 @@ export function LogsPanel({ controller, state }: Pick<PageProps, "controller" | 
                 setConfirmClear(false);
               }}
             >
-              确认清空
+              {t("logs.clearConfirm")}
             </Button>
           </>
         }
       >
-        将清空当前会话的全部日志记录，无法撤销。导出的日志文件不受影响。
+        {t("logs.clearBody")}
       </Modal>
     </div>
   );

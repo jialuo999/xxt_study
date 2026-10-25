@@ -1,4 +1,5 @@
 import type { PageInfo, Question } from "@/core/types";
+import { t } from "@/core/i18n";
 import {
   createMessage,
   createToken,
@@ -494,7 +495,7 @@ export class FrameAgent {
         results.push({
           questionId: item.questionId,
           ok: false,
-          message: "题目已变化，请重新扫描",
+          message: t("run.toast.questionChanged"),
         });
         continue;
       }
@@ -524,9 +525,9 @@ export class FrameAgent {
     const settings = getSettings();
     let result;
     if (this.context.page.kind === "exam" && !settings.solving.allowExam) {
-      result = { ok: false, message: "考试页面已保护，已阻止提交" };
+      result = { ok: false, message: t("run.toast.examSubmit") };
     } else if (!this.adapter.submit) {
-      result = { ok: false, message: "当前页面没有提交按钮" };
+      result = { ok: false, message: t("run.toast.noSubmitButton") };
     } else {
       try {
         result = await this.adapter.submit(this.context, {

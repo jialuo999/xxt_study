@@ -1,4 +1,5 @@
 import { getSettings } from "@/core/settings-store";
+import { t } from "@/core/i18n";
 import type { MediaState, PageInfo } from "@/core/types";
 import type { PageContext, PlatformAdapter } from "@/platform/types";
 import { jitter, sleep } from "@/utils/async";
@@ -97,7 +98,7 @@ export class AutoTurnRunner {
     this.visited = session.visited ?? [];
     this.host.onStarted?.();
     logger.info("autoturn", `恢复自动翻页（第 ${this.steps} 步）`);
-    this.emit("已恢复自动翻页，即将继续");
+    this.emit(t("autoturn.restored"));
     setTimeout(() => void this.loop(), Math.max(800, settings.autoTurn.startDelayMs));
     return true;
   }
@@ -113,13 +114,19 @@ export class AutoTurnRunner {
     this.host.onStarted?.();
     logger.info("autoturn", "开始自动翻页");
     const delay = Math.max(0, settings.autoTurn.startDelayMs);
-    this.emit(delay ? `将在 ${Math.ceil(delay / 1000)} 秒后开始` : "准备开始自动翻页", false, Date.now() + delay);
+    this.emit(
+      delay
+        ? t("autoturn.startingIn", { seconds: Math.ceil(delay / 1000) })
+        : t("autoturn.preparing"),
+      false,
+      Date.now() + delay,
+    );
     setTimeout(() => {
       if (this.running) void this.loop();
     }, delay);
   }
 
-  stop(reason = "已停止自动翻页"): void {
+  stop(reason = t("autoturn.defaultStop")): void {
     if (!this.running) {
       // 未运行时的 stop 不得暂停用户正在播放的媒体；只清理残留会话。
       this.persist(false);
@@ -143,7 +150,7 @@ export class AutoTurnRunner {
   /** 检测到平台人机验证时立即停止，避免继续点击加重风控 */
   private stopForVerification(): boolean {
     if (!this.host.hasVerificationChallenge()) return false;
-    this.stop("检测到平台验证，自动翻页已暂停；请手动完成验证后重新开始");
+    this.stop(t("autoturn.verifyStop"));
     return true;
   }
 
@@ -154,20 +161,20 @@ export class AutoTurnRunner {
     const page = this.host.getPage();
 
     if (!page.supported) {
-      this.stop("当前页面不支持自动翻页");
+      this.stop(t("autoturn.unsupported"));
       return;
     }
     if (page.kind !== "chapter" && page.kind !== "cards" && page.kind !== "video") {
-      this.stop("当前页面不是章节/视频页，自动翻页已停止");
+      this.stop(t("autoturn.notChapterPage"));
       return;
     }
     if (this.stopForVerification()) return;
     if (this.steps >= settings.autoTurn.maxSteps) {
-      this.stop(`已达到最大步数（${settings.autoTurn.maxSteps}），已停止`);
+      this.stop(t("autoturn.maxSteps", { count: settings.autoTurn.maxSteps }));
       return;
     }
     if (settings.autoTurn.stopOnUnanswered && this.host.hasUnansweredQuestions()) {
-      this.stop("检测到未答题目，已暂停自动翻页");
+      this.stop(t("autoturn.unansweredStop"));
       return;
     }
 
@@ -191,27 +198,32 @@ export class AutoTurnRunner {
         });
         if (target.allTasksFinished) {
           mediaHandled = true;
-          this.emit("当前任务点均已完成，跳过等待", false);
+          this.emit(t("autoturn.tasksDone"), false);
           logger.info("autoturn", "当前章节任务点均已完成，跳过媒体等待");
         } else {
-          const kind = target.source === "frames" ? "视频" : "任务点";
+          const kind =
+            target.source === "frames" ? t("autoturn.kind.video") : t("autoturn.kind.task");
           const label = target.taskTotal
-            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kind}`
-            : `第 ${target.taskIndex + 1} 个${kind}`;
-          this.emit(`按顺序播放${label}`, false);
+            ? t("autoturn.taskLabel", {
+                index: target.taskIndex + 1,
+                total: target.taskTotal,
+                kind,
+              })
+            : t("autoturn.taskLabelSingle", { index: target.taskIndex + 1, kind });
+          this.emit(t("autoturn.playInOrder", { label }), false);
           logger.info("autoturn", `按任务点顺序等待${label}`, { frameId: target.frameId, mode: target.source });
           const taskResult = await this.waitForTaskMedia(isAlive);
           if (!this.running || token !== this.loopToken) return;
           if (taskResult === "timeout") {
-            this.stop("等待任务点视频结束超时，已暂停");
+            this.stop(t("autoturn.waitTaskTimeout"));
             return;
           }
           if (taskResult === "blocked") {
-            this.stop("任务点视频处于暂停且无法自动恢复，请手动播放后重新开始");
+            this.stop(t("autoturn.taskPaused"));
             return;
           }
           if (taskResult === "stalled") {
-            this.stop("任务点仍未标记完成（阅读/文档可能未滚动到底或视频未播完），已暂停");
+            this.stop(t("autoturn.taskNotFinished"));
             return;
           }
           if (taskResult === "done") mediaHandled = true;
@@ -228,13 +240,13 @@ export class AutoTurnRunner {
 
       const taskFinished = Boolean(external?.currentTaskFinished);
       if (taskFinished) {
-        this.emit("当前任务点均已完成，跳过等待", false);
+        this.emit(t("autoturn.tasksDone"), false);
         logger.info("autoturn", "当前任务点均已完成，跳过媒体等待");
       } else if (external?.allTasksFinished) {
         logger.debug("autoturn", "当前章节任务点均已完成", external);
       }
       if (!taskFinished) {
-        this.emit("等待视频/音频播放结束…", false);
+        this.emit(t("autoturn.waitMedia"), false);
         if (external?.hasMedia) {
           const externalResult = await this.waitForExternalMedia(
             MEDIA_WAIT_TIMEOUT,
@@ -243,11 +255,11 @@ export class AutoTurnRunner {
           );
           if (!this.running || token !== this.loopToken) return;
           if (externalResult === "blocked") {
-            this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+            this.stop(t("autoturn.mediaPaused"));
             return;
           }
           if (externalResult === "timeout") {
-            this.stop("等待视频/音频结束超时，已暂停");
+            this.stop(t("autoturn.waitMediaTimeout"));
             return;
           }
         }
@@ -263,11 +275,11 @@ export class AutoTurnRunner {
           );
           if (!this.running || token !== this.loopToken) return;
           if (localResult === "blocked") {
-            this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+            this.stop(t("autoturn.mediaPaused"));
             return;
           }
           if (localResult === "timeout") {
-            this.stop("等待视频/音频结束超时，已暂停");
+            this.stop(t("autoturn.waitMediaTimeout"));
             return;
           }
         }
@@ -282,16 +294,20 @@ export class AutoTurnRunner {
             );
             if (!this.running || token !== this.loopToken) return;
             if (lateResult === "blocked") {
-              this.stop("视频/音频处于暂停且无法自动恢复，请手动播放后重新开始");
+              this.stop(t("autoturn.mediaPaused"));
               return;
             }
             if (lateResult === "timeout") {
-              this.stop("等待视频/音频结束超时，已暂停");
+              this.stop(t("autoturn.waitMediaTimeout"));
               return;
             }
           } else if (settings.autoTurn.contentWaitMs > 0) {
             const wait = Math.min(120000, Math.max(0, settings.autoTurn.contentWaitMs));
-            this.emit(`未检测到音视频，等待 ${Math.ceil(wait / 1000)} 秒后翻页`, false, Date.now() + wait);
+            this.emit(
+              t("autoturn.noMediaWait", { seconds: Math.ceil(wait / 1000) }),
+              false,
+              Date.now() + wait,
+            );
             await sleep(wait);
             if (!this.running || token !== this.loopToken) return;
           }
@@ -300,7 +316,11 @@ export class AutoTurnRunner {
     }
 
     const delay = jitter(settings.autoTurn.minDelayMs, settings.autoTurn.maxDelayMs);
-    this.emit(`${Math.max(1, Math.ceil(delay / 1000))} 秒后翻页`, false, Date.now() + delay);
+    this.emit(
+      t("autoturn.nextIn", { seconds: Math.max(1, Math.ceil(delay / 1000)) }),
+      false,
+      Date.now() + delay,
+    );
     await sleep(delay);
     if (!this.running || token !== this.loopToken) return;
     if (this.stopForVerification()) return;
@@ -308,7 +328,7 @@ export class AutoTurnRunner {
     const adapter = this.host.getAdapter();
     const context = this.host.getContext();
     if (!adapter?.nextPage || !context) {
-      this.stop("当前页面没有可用的翻页按钮");
+      this.stop(t("autoturn.noNextButton"));
       return;
     }
 
@@ -321,19 +341,19 @@ export class AutoTurnRunner {
         result = await adapter.nextPage(context);
       } catch (error) {
         logger.error("autoturn", "翻页时出错", error);
-        this.stop("翻页出错，已暂停");
+        this.stop(t("autoturn.turnError"));
         return;
       }
       if (!this.running || token !== this.loopToken) return;
       if (result.ok) break;
       if (attempt < 2) {
-        this.emit(result.message || "等待「下一节」按钮…", false);
+        this.emit(result.message || t("autoturn.waitNextButton"), false);
         logger.debug("autoturn", "翻页按钮不可用，稍后重试", { attempt: attempt + 1 });
         await sleep(700 * (attempt + 1));
       }
     }
     if (!result?.ok) {
-      this.stop(result?.message || "翻页失败，已暂停");
+      this.stop(result?.message || t("autoturn.turnFailed"));
       return;
     }
 
@@ -358,19 +378,19 @@ export class AutoTurnRunner {
       );
     }
     if (!changed) {
-      this.stop("点击下一节后页面没有变化（任务点可能已完成或按钮无效），已暂停");
+      this.stop(t("autoturn.noChange"));
       return;
     }
 
     this.steps++;
     this.visited.push(before);
     if (this.visited.filter((signature) => signature === before).length >= 3) {
-      this.stop("检测到页面重复，可能已到最后一页");
+      this.stop(t("autoturn.duplicate"));
       return;
     }
     this.persist(true);
     logger.debug("autoturn", "任务点已切换", this.host.getTaskSignature());
-    this.emit(result.message || `已翻到下一页（${this.steps}）`, false);
+    this.emit(result.message || t("autoturn.turned", { step: this.steps }), false);
     logger.info("autoturn", `第 ${this.steps} 步：${result.action}`);
 
     await sleep(1000);
@@ -459,9 +479,13 @@ export class AutoTurnRunner {
           }
           this.host.startReadingTask?.(target);
           const label = target.taskTotal
-            ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个任务点`
-            : "当前任务点";
-          this.emit(`正在完成阅读/文档任务（${label}）…`, false);
+            ? t("autoturn.taskLabel", {
+                index: target.taskIndex + 1,
+                total: target.taskTotal,
+                kind: t("autoturn.kind.task"),
+              })
+            : t("autoturn.currentTask");
+          this.emit(t("autoturn.readingTask", { label }), false);
           logger.info("autoturn", "开始完成阅读/文档任务", {
             taskIndex: target.taskIndex,
             taskTotal: target.taskTotal,
@@ -511,7 +535,7 @@ export class AutoTurnRunner {
       if (state?.allEnded) {
         if (!endedSince) {
           endedSince = Date.now();
-          this.emit("任务点视频已结束，等待任务点完成…", false);
+          this.emit(t("autoturn.taskVideoEnded"), false);
           logger.info("autoturn", "任务点视频结束，等待任务点完成标记", {
             frameId: target.frameId,
           });
@@ -529,12 +553,18 @@ export class AutoTurnRunner {
         lastFrameId = target.frameId;
         lastActivate = Date.now();
         this.host.activateMediaFrame(target.frameId);
-        const kindLabel = target.source === "frames" ? "视频" : "任务点";
+        const kindLabel =
+          target.source === "frames" ? t("autoturn.kind.video") : t("autoturn.kind.task");
         const label = target.taskTotal
-          ? `第 ${target.taskIndex + 1}/${target.taskTotal} 个${kindLabel}`
-          : `第 ${target.taskIndex + 1} 个${kindLabel}`;
-        this.emit(`开始播放${label}`, false);
-        logger.info("autoturn", `开始播放${label}`, {
+          ? t("autoturn.taskLabel", {
+              index: target.taskIndex + 1,
+              total: target.taskTotal,
+              kind: kindLabel,
+            })
+          : t("autoturn.taskLabelSingle", { index: target.taskIndex + 1, kind: kindLabel });
+        const playLabel = t("autoturn.playTask", { label });
+        this.emit(playLabel, false);
+        logger.info("autoturn", playLabel, {
           frameId: target.frameId,
           mode: target.source ?? "tasks",
         });
@@ -550,7 +580,10 @@ export class AutoTurnRunner {
         }
         if (Date.now() - pausedSince > 8000 && Date.now() - lastNotice > 15000) {
           lastNotice = Date.now();
-          this.emit(`第 ${target.taskIndex + 1} 个任务点视频已暂停，请手动点击播放`, false);
+          this.emit(
+            t("autoturn.taskVideoPaused", { index: target.taskIndex + 1 }),
+            false,
+          );
           logger.info("autoturn", "任务点视频暂停且无法自动恢复，等待手动播放", {
             frameId: target.frameId,
           });
@@ -595,7 +628,7 @@ export class AutoTurnRunner {
         // 不因暂停直接停止，等待用户手动播放；播放结束后会自动继续翻页
         if (Date.now() - pausedSince > 8000 && Date.now() - lastPauseNotice > 15000) {
           lastPauseNotice = Date.now();
-          this.emit("视频已暂停，请手动点击播放；播放结束后会自动翻页", false);
+          this.emit(t("autoturn.videoPaused"), false);
           logger.info("autoturn", "视频暂停且无法自动恢复，等待手动播放");
         }
       } else {

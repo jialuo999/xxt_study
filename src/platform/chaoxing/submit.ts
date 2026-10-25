@@ -10,6 +10,7 @@
  * - 点击后 15 秒内未检测到结果时返回 ok:false 并提示人工确认。
  */
 import type { SubmitResult } from "../../core/types";
+import { t } from "../../core/i18n";
 import type { PageContext, SubmitOptions } from "../types";
 import { logger } from "../../core/logger";
 import { unsafeWindowRef } from "../../core/gm";
@@ -244,7 +245,7 @@ async function waitForOutcome(
         );
         return {
           ok: false,
-          message: "提交后页面跳转到登录/验证页，提交状态未知，请人工确认",
+          message: t("submit.loginRedirect"),
           url,
         };
       }
@@ -257,7 +258,7 @@ async function waitForOutcome(
         const text = textOf(ctx.doc.body);
         return {
           ok: true,
-          message: "提交后页面已跳转至结果页",
+          message: t("submit.resultPage"),
           score: extractScore(text),
           url,
         };
@@ -272,7 +273,7 @@ async function waitForOutcome(
     if (keyword) {
       return {
         ok: true,
-        message: `检测到提交结果：${keyword}`,
+        message: t("submit.detected", { keyword }),
         score: extractScore(currentText),
         url,
       };
@@ -282,13 +283,13 @@ async function waitForOutcome(
   if (redirectedTo) {
     return {
       ok: false,
-      message: "页面已跳转但未检测到提交结果，提交状态未知，请人工确认",
+      message: t("submit.redirectNoResult"),
       url: redirectedTo,
     };
   }
   return {
     ok: false,
-    message: "15 秒内未检测到提交结果，提交状态未知，请人工确认",
+    message: t("submit.timeout"),
     url: currentUrl(ctx),
   };
 }
@@ -301,7 +302,7 @@ export async function submitAnswers(
     if (submittedDocuments.has(ctx.doc)) {
       return {
         ok: false,
-        message: "本次页面已提交过，跳过重复提交",
+        message: t("submit.duplicate"),
         url: currentUrl(ctx),
       };
     }
@@ -310,7 +311,7 @@ export async function submitAnswers(
     if (!button) {
       return {
         ok: false,
-        message: "未找到提交按钮，请手动提交",
+        message: t("submit.noButton"),
         url: currentUrl(ctx),
       };
     }
@@ -323,14 +324,14 @@ export async function submitAnswers(
     const { clicked } = clickSubmitButton(ctx, button, options?.autoConfirm === true);
     if (!clicked) {
       submittedDocuments.delete(ctx.doc);
-      return { ok: false, message: "点击提交按钮失败，请手动提交", url: currentUrl(ctx) };
+      return { ok: false, message: t("submit.clickFailed"), url: currentUrl(ctx) };
     }
 
     return await waitForOutcome(ctx, beforeUrl, beforeText);
   } catch (error) {
     return {
       ok: false,
-      message: `提交异常：${errorText(error)}`,
+      message: t("submit.error", { message: errorText(error) }),
       url: currentUrl(ctx),
     };
   }

@@ -1,4 +1,5 @@
 import type { DeepPartial, Settings } from "@/core/settings";
+import { t } from "@/core/i18n";
 import { Field, TextInput, Toggle } from "@/ui/components";
 import type { PageProps } from "../pages/shared";
 
@@ -10,8 +11,8 @@ export function BankPanel({ controller, state }: Pick<PageProps, "controller" | 
   return (
     <>
       <Field
-        label={`模糊匹配阈值：${bank.fuzzyThreshold.toFixed(2)}`}
-        hint="建议 0.84–0.90"
+        label={t("bankPanel.fuzzy", { value: bank.fuzzyThreshold.toFixed(2) })}
+        hint={t("bankPanel.fuzzyHint")}
       >
         <input
           class="sh-range"
@@ -23,7 +24,7 @@ export function BankPanel({ controller, state }: Pick<PageProps, "controller" | 
           onInput={(event) => save({ bank: { fuzzyThreshold: Number(event.currentTarget.value) } })}
         />
       </Field>
-      <Field label="缓存保留天数" hint="缓存命中不重复请求">
+      <Field label={t("bankPanel.cacheDays")} hint={t("bankPanel.cacheHint")}>
         <TextInput
           type="number"
           min="0"
@@ -39,19 +40,19 @@ export function BankPanel({ controller, state }: Pick<PageProps, "controller" | 
       <Toggle
         checked={bank.remote.enabled}
         onChange={(enabled) => save({ bank: { remote: { enabled } } })}
-        label="启用远程题库"
-        description="HTTP 接口，失败回退 AI"
+        label={t("bankPanel.remoteEnable")}
+        description={t("bankPanel.remoteEnableHint")}
       />
       {bank.remote.enabled ? (
         <div class="sh-stack" style="margin-top:6px">
-          <Field label="接口 URL">
+          <Field label={t("bankPanel.url")}>
             <TextInput
               value={bank.remote.url}
               placeholder="https://example.com/api/search"
               onBlur={(event) => save({ bank: { remote: { url: event.currentTarget.value.trim() } } })}
             />
           </Field>
-          <Field label="答案字段路径" hint="如 data.answer；留空用 answer">
+          <Field label={t("bankPanel.answerPath")} hint={t("bankPanel.answerPathHint")}>
             <TextInput
               value={bank.remote.answerPath}
               placeholder="answer"
@@ -60,7 +61,7 @@ export function BankPanel({ controller, state }: Pick<PageProps, "controller" | 
               }
             />
           </Field>
-          <Field label="置信度字段路径">
+          <Field label={t("bankPanel.confidencePath")}>
             <TextInput
               value={bank.remote.confidencePath}
               placeholder="confidence"
@@ -69,7 +70,7 @@ export function BankPanel({ controller, state }: Pick<PageProps, "controller" | 
               }
             />
           </Field>
-          <Field label="请求体模板" hint="占位符：{{question}} / {{type}} / {{options}}">
+          <Field label={t("bankPanel.bodyTemplate")} hint={t("bankPanel.bodyTemplateHint")}>
             <textarea
               class="sh-textarea"
               rows={4}

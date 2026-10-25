@@ -6,6 +6,7 @@
  */
 
 import { getSettings } from "@/core/settings-store";
+import { t } from "@/core/i18n";
 import type { VideoSettings } from "@/core/settings";
 import { sleep } from "@/utils/async";
 import { collectMedia, focusMedia, pickPrimaryMedia } from "./media-preferences";
@@ -201,7 +202,7 @@ export async function waitForMedia(
         const pausedFor = now - (pausedSince.get(primary) ?? now);
         if (pausedFor > 8000 && now - lastPausedNotice > 15000) {
           lastPausedNotice = now;
-          onPausedNotice?.("视频已暂停，请手动点击播放；播放结束后会自动翻页");
+          onPausedNotice?.(t("autoturn.videoPaused"));
         }
       } else {
         pausedSince.delete(primary);

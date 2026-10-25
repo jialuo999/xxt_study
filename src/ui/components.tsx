@@ -5,6 +5,7 @@ import type {
   SelectHTMLAttributes,
 } from "preact";
 import { useId } from "preact/hooks";
+import { getLocale, t } from "@/core/i18n";
 
 export type IconName =
   | "spark"
@@ -571,7 +572,7 @@ export function Confidence({ value }: { value: number }) {
   const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
   const tone = percent >= 80 ? "#34d399" : percent >= 60 ? "#fbbf24" : "#fb7185";
   return (
-    <span class="sh-confidence" title={`置信度 ${percent}%`}>
+    <span class="sh-confidence" title={t("common.confidenceTip", { percent })}>
       <span class="sh-confidence__track">
         <span
           class="sh-confidence__fill"
@@ -590,10 +591,10 @@ export function formatClock(ts: number): string {
 
 export function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return new Date(ts).toLocaleDateString();
+  if (diff < 60_000) return t("common.justNow");
+  if (diff < 3_600_000) return t("common.minutesAgo", { count: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("common.hoursAgo", { count: Math.floor(diff / 3_600_000) });
+  return new Date(ts).toLocaleDateString(getLocale());
 }
 
 export function Spinner({ size = 14 }: { size?: number }) {

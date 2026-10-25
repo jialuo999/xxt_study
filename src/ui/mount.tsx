@@ -3,6 +3,7 @@ import styles from "./theme.css?inline";
 import { App } from "./App";
 import type { UiController } from "./contract";
 import { registerMenuCommand } from "@/core/gm";
+import { applyLanguage, t } from "@/core/i18n";
 import { getSettings } from "@/core/settings-store";
 
 const HOST_ID = "study-helper-host";
@@ -19,6 +20,7 @@ export function isUiMounted(): boolean {
 
 export function mountUi(controller: UiController): void {
   if (isUiMounted()) return;
+  applyLanguage(getSettings().ui.language);
 
   const host = document.createElement("div");
   host.id = HOST_ID;
@@ -54,8 +56,8 @@ export function mountUi(controller: UiController): void {
   };
   window.addEventListener("keydown", onKeyDown, true);
 
-  registerMenuCommand("打开 / 收起学习助手", () => controller.togglePanel());
-  registerMenuCommand("重新扫描当前页面题目", () => void controller.refresh());
+  registerMenuCommand(t("menu.toggle"), () => controller.togglePanel());
+  registerMenuCommand(t("menu.rescan"), () => void controller.refresh());
 }
 
 export function unmountUi(): void {

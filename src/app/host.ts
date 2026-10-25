@@ -7,6 +7,7 @@ import type {
   SolveResult,
   SubmitResult,
 } from "@/core/types";
+import { applyLanguage, t } from "@/core/i18n";
 import {
   getSettings,
   updateSettings,
@@ -146,6 +147,7 @@ export class HostController implements UiController {
   private disposers: Array<() => void> = [];
 
   constructor() {
+    applyLanguage(getSettings().ui.language);
     this.state = {
       ready: false,
       page: { ...UNKNOWN_PAGE, title: document.title },
@@ -154,7 +156,7 @@ export class HostController implements UiController {
       questions: [],
       results: {},
       status: "idle",
-      statusText: "初始化…",
+      statusText: t("run.status.init"),
       progress: null,
       filledQuestionIds: [],
       autoTurn: {
@@ -195,7 +197,7 @@ export class HostController implements UiController {
         this.stopPlaybackGuard();
         this.releaseAutoTurnLock();
         this.toast("info", reason);
-        this.patch({ statusText: "自动翻页已停止" });
+        this.patch({ statusText: t("run.status.autoStopped") });
       },
     });
   }
@@ -213,9 +215,10 @@ export class HostController implements UiController {
     window.addEventListener("message", this.handleMessage);
     this.disposers.push(
       subscribeSettings((settings) => {
+        applyLanguage(settings.ui.language);
         this.patch({ settings });
         if (!settings.autoTurn.enabled && this.autoTurn.isRunning) {
-          this.autoTurn.stop("自动翻页已关闭");
+          this.autoTurn.stop(t("autoturn.disabledStop"));
         }
       }),
       subscribeLogs((logs) => this.patch({ logs })),
@@ -270,10 +273,12 @@ export class HostController implements UiController {
 
     this.patch({
       ready: true,
-      statusText: this.state.verification.detected ? "需要手动验证" : "待命",
+      statusText: this.state.verification.detected
+        ? t("run.status.verifyRequired")
+        : t("run.status.ready"),
     });
     if (!this.state.verification.detected) {
-      this.toast("info", "学习助手已就绪，默认人工复核");
+      this.toast("info", t("run.toast.ready"));
     }
   }
 
@@ -291,7 +296,7 @@ export class HostController implements UiController {
     resetSubmitGuard(document);
     this.patch({
       status: "scanning",
-      statusText: "扫描题目…",
+      statusText: t("run.status.scanning"),
       filledQuestionIds: [],
     });
     this.detectPage();
@@ -306,15 +311,15 @@ export class HostController implements UiController {
     this.patch({
       status: "idle",
       statusText: this.state.questions.length
-        ? `已采集 ${this.state.questions.length} 题`
-        : "未发现题目",
+        ? t("run.status.collected", { count: this.state.questions.length })
+        : t("run.status.noQuestions"),
     });
     logger.debug("scan", `刷新完成，本地 ${this.localQuestions.length} 题，${this.children.size} 个子 frame`);
   }
 
   async solve(): Promise<void> {
     if (this.isExamBlocked()) {
-      this.toast("warn", "考试页面已保护：请在设置中显式开启后再作答");
+      this.toast("warn", t("run.toast.examSolve"));
       return;
     }
     if (this.state.questions.length === 0) {
@@ -326,13 +331,13 @@ export class HostController implements UiController {
       return included !== false;
     });
     if (questions.length === 0) {
-      this.toast("warn", "没有可作答的题目");
+      this.toast("warn", t("run.toast.noQuestions"));
       return;
     }
 
     this.patch({
       status: "solving",
-      statusText: "解题中…",
+      statusText: t("run.status.solving"),
       progress: { done: 0, total: questions.length },
     });
 
@@ -351,11 +356,17 @@ export class HostController implements UiController {
       this.patch({
         status: "idle",
         progress: null,
-        statusText: `已解 ${solved} 题${pending ? `，${pending} 题待确认` : ""}`,
+        statusText: t("run.status.solved", {
+          solved,
+          pending: pending ? t("run.status.solvedPending", { count: pending }) : "",
+        }),
       });
       this.toast(
         pending ? "warn" : "success",
-        pending ? `解题完成：${solved} 题已答，${pending} 题待确认` : `解题完成：${solved} 题已答`,
+        t("run.toast.solved", {
+          solved,
+          pending: pending ? t("run.toast.solvedPending", { count: pending }) : "",
+        }),
       );
 
       if (settings.solving.mode === "auto") {
@@ -365,18 +376,23 @@ export class HostController implements UiController {
       }
     } catch (error) {
       logger.error("solve", "解题失败", error);
-      this.patch({ status: "error", statusText: "解题失败", progress: null });
-      this.toast("error", `解题失败：${error instanceof Error ? error.message : String(error)}`);
+      this.patch({ status: "error", statusText: t("run.status.solveFailed"), progress: null });
+      this.toast(
+        "error",
+        t("run.toast.solveFailed", {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
   }
 
   async fillAll(questionIds?: string[]): Promise<boolean> {
     if (this.isExamBlocked()) {
-      this.toast("warn", "考试页面已保护：已阻止自动填入");
+      this.toast("warn", t("run.toast.examFill"));
       return false;
     }
     if (getSettings().solving.mode === "hint" && !questionIds) {
-      this.toast("info", "当前为「仅提示」模式，未操作页面");
+      this.toast("info", t("run.toast.hintModeNoFill"));
       return false;
     }
     const targets = this.state.questions.filter((question) => {
@@ -384,11 +400,11 @@ export class HostController implements UiController {
       return Boolean(this.state.results[question.id]?.answer);
     });
     if (targets.length === 0) {
-      this.toast("warn", "没有可填入的答案，请先解题");
+      this.toast("warn", t("run.toast.noFillTargets"));
       return false;
     }
 
-    this.patch({ status: "filling", statusText: "填入答案…" });
+    this.patch({ status: "filling", statusText: t("run.status.filling") });
     const settings = getSettings();
     const grouped = new Map<string, Question[]>();
     for (const question of targets) {
@@ -426,7 +442,7 @@ export class HostController implements UiController {
             results.push({
               questionId: question.id,
               ok: false,
-              message: "子页面连接已断开，请重新扫描",
+              message: t("run.toast.childGoneRescan"),
             });
           }
           continue;
@@ -462,10 +478,10 @@ export class HostController implements UiController {
     const ok = results.filter((result) => result.ok).length;
     const failed = results.length - ok;
     const summary = timedOut
-      ? `填入超时：${ok} 成功，${failed} 失败`
+      ? t("run.toast.fillTimeout", { ok, failed })
       : failed
-        ? `填入完成：${ok} 成功，${failed} 失败`
-        : `已填入 ${ok} 题`;
+        ? t("run.toast.fillDone", { ok, failed })
+        : t("run.toast.filled", { count: ok });
     this.patch({ status: "idle", statusText: summary });
     this.toast(failed || timedOut ? (timedOut ? "error" : "warn") : "success", summary);
     logger.info("fill", `填入完成：成功 ${ok}，失败 ${failed}${timedOut ? "，含超时" : ""}`);
@@ -474,12 +490,12 @@ export class HostController implements UiController {
 
   async submit(): Promise<void> {
     if (this.isExamBlocked()) {
-      this.toast("warn", "考试页面已保护：已阻止提交");
+      this.toast("warn", t("run.toast.examSubmit"));
       return;
     }
     const settings = getSettings();
     if (settings.solving.mode === "hint") {
-      this.toast("warn", "当前为「仅提示」模式，不会提交；请切换到复核后提交/全自动");
+      this.toast("warn", t("run.toast.hintModeNoSubmit"));
       return;
     }
     const pageKind = this.state.page.kind;
@@ -488,7 +504,7 @@ export class HostController implements UiController {
       this.filledQuestionIds.has(question.id),
     ).length;
     if (total === 0) {
-      this.toast("warn", "还没有采集到题目，无法提交");
+      this.toast("warn", t("run.toast.noQuestionsSubmit"));
       return;
     }
     // filled 只统计脚本 fillAll 的结果；用户手动填写不会出现在这里，
@@ -501,8 +517,8 @@ export class HostController implements UiController {
         this.toast(
           "warn",
           filled === 0
-            ? "未检测到脚本填入；若已手动填写，请再次点击「提交」确认"
-            : `还有 ${total - filled} 题未填入，确认要提交请再次点击「提交」`,
+            ? t("run.toast.fillNone")
+            : t("run.toast.fillPartial", { count: total - filled }),
         );
         logger.warn("submit", "提交前覆盖不足，等待二次确认", { filled, total });
         return;
@@ -518,28 +534,28 @@ export class HostController implements UiController {
       (question) => !this.state.results[question.id]?.answer,
     );
     if (unanswered.length > 0) {
-      this.toast("warn", `还有 ${unanswered.length} 题没有答案，仍尝试提交`);
+      this.toast("warn", t("run.toast.unanswered", { count: unanswered.length }));
     }
     const target = this.pickSubmitFrame();
     if (!target) {
-      this.toast("warn", "当前页面不是作业/测验/考试，无法提交");
+      this.toast("warn", t("run.toast.notSubmitPage"));
       return;
     }
-    this.patch({ status: "submitting", statusText: "提交中…" });
+    this.patch({ status: "submitting", statusText: t("run.status.submitting") });
     let result: SubmitResult;
     try {
       if (target === "top") {
         if (!this.adapter?.submit || !this.context) {
-          this.patch({ status: "idle", statusText: "提交按钮不可用" });
-          this.toast("warn", "当前页面没有找到提交按钮");
+          this.patch({ status: "idle", statusText: t("run.status.submitUnavailable") });
+          this.toast("warn", t("run.toast.noSubmitButton"));
           return;
         }
         result = await this.adapter.submit(this.context, { autoConfirm });
       } else {
         const child = this.children.get(target);
         if (!child) {
-          this.patch({ status: "idle", statusText: "提交失败" });
-          this.toast("error", "子页面连接已断开");
+          this.patch({ status: "idle", statusText: t("run.status.verifyFailed") });
+          this.toast("error", t("run.toast.childGone"));
           return;
         }
         sendToWindow(child.source, createMessage({ t: "SUBMIT", token: child.token, autoConfirm }));
@@ -551,10 +567,14 @@ export class HostController implements UiController {
         message: error instanceof Error ? error.message : String(error),
       };
     }
-    this.patch({ status: "idle", lastSubmit: result, statusText: result.ok ? "提交成功" : "提交状态未知" });
+    this.patch({
+      status: "idle",
+      lastSubmit: result,
+      statusText: result.ok ? t("run.status.submitOk") : t("run.status.submitUnknown"),
+    });
     this.toast(result.ok ? "success" : "warn", result.message);
     if (result.ok) {
-      this.autoTurn.stop("提交完成，自动翻页已停止");
+      this.autoTurn.stop(t("autoturn.submitStop"));
       this.filledQuestionIds.clear();
       this.patch({ filledQuestionIds: [] });
     }
@@ -568,15 +588,15 @@ export class HostController implements UiController {
 
   startAutoTurn(): void {
     if (this.state.verification.detected) {
-      this.toast("warn", "请先在页面上完成人机验证，再开始自动翻页");
+      this.toast("warn", t("run.toast.verifyFirst"));
       return;
     }
     if (this.isExamBlocked()) {
-      this.toast("warn", "考试页面已保护：禁止自动翻页");
+      this.toast("warn", t("run.toast.examTurn"));
       return;
     }
     if (!this.isAutoTurnPage() || !this.adapter?.nextPage) {
-      this.toast("warn", "当前页面不支持自动翻页");
+      this.toast("warn", t("run.toast.turnUnsupported"));
       return;
     }
     if (!this.acquireAutoTurnLock()) return;
@@ -585,7 +605,7 @@ export class HostController implements UiController {
       this.patch({ settings: getSettings() });
     }
     this.autoTurn.start();
-    if (this.autoTurn.isRunning) this.toast("info", "自动翻页已开始");
+    if (this.autoTurn.isRunning) this.toast("info", t("run.toast.turnStarted"));
   }
 
   stopAutoTurn(): void {
@@ -617,7 +637,7 @@ export class HostController implements UiController {
         /* ignore */
       }
     }
-    this.autoTurn.stop("页面已卸载");
+    this.autoTurn.stop(t("autoturn.pageUnloadStop"));
     this.stopPlaybackGuard();
     if (this.toastTimer) clearTimeout(this.toastTimer);
     for (const pending of this.pendingFills.values()) clearTimeout(pending.timer);
@@ -636,15 +656,22 @@ export class HostController implements UiController {
         added: result.added,
         skipped: result.skipped + result.duplicates,
         failed: result.skipped,
-        message: `导入完成：新增 ${result.added} 条，更新 ${result.updated} 条，跳过 ${
-          result.skipped + result.duplicates
-        } 条${result.skipped ? `（失败 ${result.skipped}）` : ""}`,
+        message: t("run.toast.importDone", {
+          added: result.added,
+          updated: result.updated,
+          skipped: result.skipped + result.duplicates,
+          failed: result.skipped
+            ? t("run.toast.importFailedSuffix", { count: result.skipped })
+            : "",
+        }),
       };
       this.toast(result.failed ? "warn" : "success", view.message);
       return view;
     } catch (error) {
       logger.error("bank", "导入题库失败", error);
-      const message = `导入失败：${error instanceof Error ? error.message : String(error)}`;
+      const message = t("run.toast.importFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
       this.toast("error", message);
       return { added: 0, skipped: 0, failed: 0, message };
     }
@@ -654,10 +681,10 @@ export class HostController implements UiController {
     try {
       await clearBank();
       await this.syncBankStats();
-      this.toast("success", "本地题库已清空");
+      this.toast("success", t("run.toast.bankCleared"));
     } catch (error) {
       logger.error("bank", "清空题库失败", error);
-      this.toast("error", "清空题库失败");
+      this.toast("error", t("run.toast.bankClearFailed"));
     }
   }
 
@@ -683,16 +710,18 @@ export class HostController implements UiController {
   async testAi(): Promise<AiTestView> {
     const settings = getSettings();
     if (!settings.ai.apiKey) {
-      return { ok: false, message: "请先填写 API Key" };
+      return { ok: false, message: t("run.toast.aiKeyMissing") };
     }
     try {
       const result = await testAiConnection(settings.ai);
       this.toast(result.ok ? "success" : "error", result.message);
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.toast("error", `连接失败：${message}`);
-      return { ok: false, message: `连接失败：${message}` };
+      const message = t("run.toast.aiConnectFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      this.toast("error", message);
+      return { ok: false, message };
     }
   }
 
@@ -704,7 +733,7 @@ export class HostController implements UiController {
   resetSettings(): void {
     const next = replaceSettings({ ...DEFAULT_SETTINGS });
     this.patch({ settings: next });
-    this.toast("success", "已恢复默认设置");
+    this.toast("success", t("run.toast.settingsReset"));
   }
 
   clearLogs(): void {
@@ -744,13 +773,13 @@ export class HostController implements UiController {
       const copied = await copyText(text);
       this.toast(
         copied ? "success" : "error",
-        copied ? "诊断包已复制到剪贴板" : "复制失败，请从运行日志手动导出",
+        copied ? t("run.toast.diagCopied") : t("run.toast.diagCopyFailed"),
       );
       logger.info("diagnostics", copied ? "诊断包已复制" : "诊断包复制失败");
       return copied;
     } catch (error) {
       logger.error("diagnostics", "生成诊断包失败", error);
-      this.toast("error", "生成诊断包失败");
+      this.toast("error", t("run.toast.diagBuildFailed"));
       return false;
     }
   }
@@ -774,12 +803,12 @@ export class HostController implements UiController {
       (question) => this.state.results[question.id]?.status === "pending",
     );
     if (pending.length > 0) {
-      this.toast("warn", `有 ${pending.length} 题待确认，全自动流程已暂停`);
+      this.toast("warn", t("run.toast.autoPending", { count: pending.length }));
       return;
     }
     const filled = await this.fillAll();
     if (!filled) {
-      this.toast("warn", "自动填入未全部成功，已暂停提交");
+      this.toast("warn", t("run.toast.autoFillIncomplete"));
       return;
     }
     if (!settings.solving.autoSubmit) return;
@@ -830,25 +859,33 @@ export class HostController implements UiController {
         });
       }
       if (this.autoTurn.isRunning) {
-        this.autoTurn.stop("检测到平台验证，自动翻页已暂停；请手动完成验证后重新开始");
+        this.autoTurn.stop(t("autoturn.verifyStop"));
       }
       if (!previous) {
-        this.toast("warn", "检测到平台人机验证，请先在页面上完成验证");
+        this.toast("warn", t("run.toast.verifyDetected"));
       }
       if (
         !previous ||
         this.state.status !== "error" ||
-        this.state.statusText !== "需要手动验证"
+        this.state.statusText !== t("run.status.verifyRequired")
       ) {
-        this.patch({ verification: view, status: "error", statusText: "需要手动验证" });
+        this.patch({
+          verification: view,
+          status: "error",
+          statusText: t("run.status.verifyRequired"),
+        });
       }
       return true;
     }
 
     if (previous) {
       logger.info("verify", "页面验证已通过");
-      this.patch({ verification: view, status: "idle", statusText: "验证已通过，可重新开始" });
-      this.toast("success", "验证已通过，可以重新开始自动翻页");
+      this.patch({
+        verification: view,
+        status: "idle",
+        statusText: t("run.status.verifyPassed"),
+      });
+      this.toast("success", t("run.toast.verifyPassed"));
     }
     return false;
   }
@@ -1094,11 +1131,11 @@ export class HostController implements UiController {
       const existing = this.pendingSubmits.get(frameId);
       if (existing) {
         clearTimeout(existing.timer);
-        existing.resolve({ ok: false, message: "新的提交请求已替换上一次请求" });
+        existing.resolve({ ok: false, message: t("run.submit.replaced") });
       }
       const timer = setTimeout(() => {
         this.pendingSubmits.delete(frameId);
-        resolve({ ok: false, message: "提交状态未知，请人工确认" });
+        resolve({ ok: false, message: t("run.submit.timeout") });
       }, timeoutMs);
       this.pendingSubmits.set(frameId, { resolve, timer });
     });
@@ -1349,12 +1386,12 @@ export class HostController implements UiController {
    */
   private acquireAutoTurnLock(): boolean {
     const key = lockKeyFromUrl(location.href);
-    const label = `${document.title || "学习通"} · ${location.pathname}`;
+    const label = `${document.title || t("run.label.platformFallback")} · ${location.pathname}`;
     const result = acquireLock(key, this.tabId, label, Date.now());
     if (!result.ok) {
       const holder = result.holder;
       const detail = holder.label ? `（${holder.label}）` : "";
-      this.toast("warn", `另一个标签页正在自动翻页${detail}，请先停止它`);
+      this.toast("warn", t("run.toast.tabLocked", { detail }));
       logger.warn("autoturn", "多标签互斥：另一个标签页正在运行", {
         holderTab: holder.tabId,
         holderLabel: holder.label,
@@ -1375,7 +1412,7 @@ export class HostController implements UiController {
       }
       this.tabLockHeld = false;
       this.stopTabLockTimer();
-      this.autoTurn.stop("自动翻页已被另一个标签页接管");
+      this.autoTurn.stop(t("autoturn.takenOver"));
     }, TAB_LOCK_HEARTBEAT_MS);
     return true;
   }
@@ -1485,10 +1522,10 @@ export class HostController implements UiController {
     this.rebuildQuestions();
     await this.refresh();
     if (!this.isAutoTurnPage()) {
-      this.autoTurn.stop("进入答题页面，自动翻页已停止");
+      this.autoTurn.stop(t("autoturn.solvePageStop"));
     }
     if (this.state.page.kind === "exam" && !getSettings().solving.allowExam) {
-      this.autoTurn.stop("进入考试页面，自动翻页已停止");
+      this.autoTurn.stop(t("autoturn.examPageStop"));
     }
   }
 

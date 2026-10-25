@@ -1,16 +1,19 @@
 import { useEffect, useState } from "preact/hooks";
 import type { DeepPartial, Settings, ThemeMode } from "@/core/settings";
+import { applyLanguage, t, type Language } from "@/core/i18n";
 import {
   Badge,
   Button,
   CollapsibleCard,
   Field,
+  Icon,
   Modal,
   Segmented,
   TextInput,
   Toggle,
 } from "@/ui/components";
 import { LogsPanel } from "@/ui/LogsPanel";
+import { languageLabel, themeLabel } from "@/ui/labels";
 import {
   SECTION_KEYS,
   SETTINGS_PAGE_SECTIONS,
@@ -20,13 +23,10 @@ import {
 } from "@/ui/sections";
 import type { PageProps } from "./shared";
 
-const THEME_LABEL: Record<ThemeMode, string> = {
-  auto: "跟随系统",
-  light: "浅色",
-  dark: "深色",
-};
+const PROJECT_URL = "https://github.com/jialuo999/xxt_study";
 
 export function SettingsPage({ controller, state }: PageProps) {
+  applyLanguage(state.settings.ui.language);
   const settings = state.settings;
   const [resetConfirm, setResetConfirm] = useState(false);
   const [genericDraft, setGenericDraft] = useState(() =>
@@ -50,7 +50,7 @@ export function SettingsPage({ controller, state }: PageProps) {
   const saveGenericConfig = () => {
     const text = genericDraft.trim();
     if (!text) {
-      setGenericError("请粘贴配置 JSON；清空请使用「恢复默认设置」");
+      setGenericError(t("settings.genericEmpty"));
       return;
     }
     try {
@@ -61,7 +61,7 @@ export function SettingsPage({ controller, state }: PageProps) {
         typeof parsed.questionContainer !== "string" ||
         typeof parsed.stem !== "string"
       ) {
-        setGenericError("至少需要 name / matches / questionContainer / stem 四个字段");
+        setGenericError(t("settings.genericFields"));
         return;
       }
       save({
@@ -71,46 +71,62 @@ export function SettingsPage({ controller, state }: PageProps) {
       });
       setGenericError(null);
     } catch {
-      setGenericError("JSON 格式错误，请检查逗号、引号与括号");
+      setGenericError(t("settings.genericJson"));
     }
   };
 
   const errorCount = state.logs.filter((entry) => entry.level === "error").length;
+  const version = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
   return (
     <div class="sh-stack">
       <div class="sh-settings-toolbar">
-        <span class="sh-small sh-faint">点击标题展开 / 收起</span>
+        <span class="sh-small sh-faint">{t("settings.expandHint")}</span>
         <Button
           size="sm"
           variant="ghost"
           icon={allOpen ? "chevronDown" : "chevronRight"}
           onClick={() => setAllSections(controller, SETTINGS_PAGE_SECTIONS, !allOpen)}
         >
-          {allOpen ? "全部收起" : "全部展开"}
+          {allOpen ? t("settings.collapseAll") : t("settings.expandAll")}
         </Button>
       </div>
 
       <CollapsibleCard
         id={SECTION_KEYS.settingsAppearance}
-        title="外观与快捷键"
-        hint="主题与呼出快捷键"
-        summary={`${THEME_LABEL[settings.ui.theme]} · ${settings.ui.hotkey}`}
+        title={t("settings.appearanceTitle")}
+        hint={t("settings.appearanceHint")}
+        summary={t("settings.appearanceSummary", {
+          theme: themeLabel(settings.ui.theme),
+          language: languageLabel(settings.ui.language),
+          hotkey: settings.ui.hotkey,
+        })}
         open={isOpen(SECTION_KEYS.settingsAppearance)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.settingsAppearance)}
       >
-        <Field label="主题">
+        <Field label={t("settings.theme")}>
           <Segmented<ThemeMode>
             value={settings.ui.theme}
             onChange={(theme) => save({ ui: { theme } })}
             options={[
-              { value: "auto", label: "跟随系统" },
-              { value: "light", label: "浅色" },
-              { value: "dark", label: "深色" },
+              { value: "auto", label: themeLabel("auto") },
+              { value: "light", label: themeLabel("light") },
+              { value: "dark", label: themeLabel("dark") },
             ]}
           />
         </Field>
-        <Field label="快捷键" hint="如 Alt+Shift+S">
+        <Field label={t("settings.language")} hint={t("settings.languageHint")}>
+          <Segmented<Language>
+            value={settings.ui.language}
+            onChange={(language) => save({ ui: { language } })}
+            options={[
+              { value: "auto", label: t("language.auto") },
+              { value: "zh-CN", label: t("language.zhCN") },
+              { value: "en", label: t("language.en") },
+            ]}
+          />
+        </Field>
+        <Field label={t("settings.hotkey")} hint={t("settings.hotkeyHint")}>
           <TextInput
             value={settings.ui.hotkey}
             onBlur={(event) =>
@@ -122,27 +138,30 @@ export function SettingsPage({ controller, state }: PageProps) {
 
       <CollapsibleCard
         id={SECTION_KEYS.settingsAdvanced}
-        title="高级与通用适配器"
-        hint="调试日志与自定义平台选择器"
-        summary={`${settings.advanced.debug ? "调试开" : "调试关"}${
-          settings.advanced.genericConfig ? " · 已配置" : ""
-        }`}
+        title={t("settings.advancedTitle")}
+        hint={t("settings.advancedHint")}
+        summary={t("settings.advancedSummary", {
+          debug: settings.advanced.debug ? t("settings.debugOn") : t("settings.debugOff"),
+          configured: settings.advanced.genericConfig
+            ? t("settings.configured")
+            : t("settings.notConfigured"),
+        })}
         open={isOpen(SECTION_KEYS.settingsAdvanced)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.settingsAdvanced)}
       >
         <Toggle
           checked={settings.advanced.debug}
           onChange={(debug) => save({ advanced: { debug } })}
-          label="调试模式"
-          description="输出详细日志"
+          label={t("settings.debug")}
+          description={t("settings.debugHint")}
         />
-        <Field label="通用适配器 JSON" hint="必填：name / matches / questionContainer / stem">
+        <Field label={t("settings.genericConfig")} hint={t("settings.genericConfigHint")}>
           <textarea
             class="sh-textarea"
             rows={7}
             spellcheck={false}
             value={genericDraft}
-            placeholder={'{\n  "name": "作业",\n  "matches": ["example.com"],\n  "questionContainer": ".question",\n  "stem": ".stem",\n  "options": ".option",\n  "nextButton": ".next"\n}'}
+            placeholder={t("settings.genericPlaceholder")}
             onInput={(event) => setGenericDraft(event.currentTarget.value)}
           />
         </Field>
@@ -153,7 +172,7 @@ export function SettingsPage({ controller, state }: PageProps) {
         ) : null}
         <div class="sh-actions" style="margin-top:8px">
           <Button size="sm" icon="check" onClick={saveGenericConfig}>
-            保存通用适配器
+            {t("settings.saveGeneric")}
           </Button>
           <Button
             size="sm"
@@ -163,38 +182,51 @@ export function SettingsPage({ controller, state }: PageProps) {
               setGenericError(null);
             }}
           >
-            清空编辑框
+            {t("settings.clearDraft")}
           </Button>
         </div>
       </CollapsibleCard>
 
       <CollapsibleCard
         id={SECTION_KEYS.settingsData}
-        title="数据与隐私"
-        hint="数据仅保存在本机"
-        summary={`AI Key ${settings.ai.apiKey ? "已设置" : "未设置"} · 题库 ${state.bank.total} 条`}
+        title={t("settings.dataTitle")}
+        hint={t("settings.dataHint")}
+        summary={t("settings.dataSummary", {
+          keyState: settings.ai.apiKey ? t("settings.keySet") : t("settings.keyUnset"),
+          count: state.bank.total,
+        })}
         open={isOpen(SECTION_KEYS.settingsData)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.settingsData)}
       >
         <div class="sh-actions">
           <Button size="sm" variant="danger" icon="trash" onClick={() => setResetConfirm(true)}>
-            恢复默认设置
+            {t("settings.reset")}
           </Button>
         </div>
         <div class="sh-hint" style="margin-top:8px">
-          AI Key 在「答题 → AI 接口」中配置 · 当前 Key：
-          {settings.ai.apiKey ? mask(settings.ai.apiKey) : "未设置"} · 题库 {state.bank.total} 条
+          {t("settings.dataNote", {
+            key: settings.ai.apiKey ? mask(settings.ai.apiKey) : t("settings.keyUnset"),
+            count: state.bank.total,
+          })}
         </div>
       </CollapsibleCard>
 
       <CollapsibleCard
         id={SECTION_KEYS.settingsLogs}
-        title="运行日志"
-        hint="自动脱敏，最多保留 500 条"
-        summary={`${state.logs.length} 条记录${errorCount ? ` · ${errorCount} 条错误` : ""}`}
+        title={t("settings.logsTitle")}
+        hint={t("settings.logsHint")}
+        summary={
+          errorCount
+            ? t("settings.logsSummaryErrors", { count: state.logs.length, errors: errorCount })
+            : t("settings.logsSummary", { count: state.logs.length })
+        }
         open={isOpen(SECTION_KEYS.settingsLogs)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.settingsLogs)}
-        action={errorCount ? <Badge tone="danger">{errorCount} 错误</Badge> : undefined}
+        action={
+          errorCount ? (
+            <Badge tone="danger">{t("settings.logsErrorBadge", { count: errorCount })}</Badge>
+          ) : undefined
+        }
       >
         <LogsPanel controller={controller} state={state} />
         <div class="sh-actions" style="margin-top:8px">
@@ -204,22 +236,61 @@ export function SettingsPage({ controller, state }: PageProps) {
             icon="copy"
             onClick={() => void controller.copyDiagnostics()}
           >
-            复制诊断包
+            {t("settings.copyDiagnostics")}
           </Button>
-          <span class="sh-small sh-faint">
-            页面结构 + 选择器命中 + 脱敏设置与日志，不含答案
-          </span>
+          <span class="sh-small sh-faint">{t("settings.diagnosticsHint")}</span>
+        </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        id={SECTION_KEYS.settingsAbout}
+        title={t("about.title")}
+        hint={t("about.hint")}
+        summary={t("about.summary", { version })}
+        open={isOpen(SECTION_KEYS.settingsAbout)}
+        onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.settingsAbout)}
+        action={<Badge tone="accent">{`v${version}`}</Badge>}
+      >
+        <div class="sh-stack" style="gap:6px">
+          <div class="sh-row sh-row--between">
+            <span class="sh-small sh-muted">{t("about.version")}</span>
+            <span class="sh-small">{version}</span>
+          </div>
+          <div class="sh-row sh-row--between">
+            <span class="sh-small sh-muted">{t("about.developer")}</span>
+            <span class="sh-small">{t("about.developerValue")}</span>
+          </div>
+          <div class="sh-row sh-row--between">
+            <span class="sh-small sh-muted">{t("about.license")}</span>
+            <span class="sh-small">{t("about.licenseValue")}</span>
+          </div>
+          <div class="sh-row sh-row--between" style="align-items:flex-start">
+            <span class="sh-small sh-muted">{t("about.project")}</span>
+            <a
+              class="sh-link"
+              href={PROJECT_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={t("about.openProject")}
+            >
+              {t("about.projectValue")}
+              <Icon name="external" size={12} />
+            </a>
+          </div>
+          <div class="sh-hint" style="margin-top:4px">
+            {t("about.note")}
+          </div>
         </div>
       </CollapsibleCard>
 
       <Modal
         open={resetConfirm}
-        title="恢复默认设置？"
+        title={t("settings.resetTitle")}
         onClose={() => setResetConfirm(false)}
         actions={
           <>
             <Button size="sm" variant="ghost" onClick={() => setResetConfirm(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               size="sm"
@@ -229,12 +300,12 @@ export function SettingsPage({ controller, state }: PageProps) {
                 setResetConfirm(false);
               }}
             >
-              确认恢复
+              {t("settings.resetConfirm")}
             </Button>
           </>
         }
       >
-        将重置 AI、答题模式、自动翻页、题库阈值与外观设置，但不会删除题库与日志。
+        {t("settings.resetBody")}
       </Modal>
     </div>
   );

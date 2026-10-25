@@ -5,8 +5,16 @@ import { HomePage } from "../../src/ui/pages/Home";
 import { SolvePage } from "../../src/ui/pages/Solve";
 import { BankPage } from "../../src/ui/pages/Bank";
 import { SettingsPage } from "../../src/ui/pages/Settings";
-import { DEFAULT_SETTINGS } from "../../src/core/settings";
+import { DEFAULT_SETTINGS, type Settings } from "../../src/core/settings";
+import { setLocale } from "../../src/core/i18n";
 import type { UiController, UiState } from "../../src/ui/contract";
+
+/** 界面测试固定中文，语言切换本身单独测；默认 "auto" 在 jsdom 下会解析成英文。 */
+function makeSettings(): Settings {
+  const settings = structuredClone(DEFAULT_SETTINGS);
+  settings.ui.language = "zh-CN";
+  return settings;
+}
 
 function makeState(patch: Partial<UiState> = {}): UiState {
   return {
@@ -27,7 +35,7 @@ function makeState(patch: Partial<UiState> = {}): UiState {
     filledQuestionIds: [],
     autoTurn: { running: false, steps: 0, maxSteps: 200, message: "", nextAt: null },
     bank: { total: 0, lastUpdated: null, storage: "indexeddb", indexedDbAvailable: true },
-    settings: structuredClone(DEFAULT_SETTINGS),
+    settings: makeSettings(),
     logs: [],
     lastSubmit: null,
     toast: null,
@@ -75,6 +83,7 @@ function findButton(container: HTMLElement, text: string): HTMLElement | undefin
 }
 
 afterEach(() => {
+  setLocale("zh-CN");
   for (const container of containers.splice(0)) render(null, container);
 });
 
@@ -153,7 +162,7 @@ describe("导航与主页布局", () => {
   });
 
   it("缺 Key 提示跳到答题页并展开 AI 接口", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
+    const settings = makeSettings();
     settings.ai.enabled = true;
     settings.ai.apiKey = "";
     const state = makeState({ settings });
@@ -239,7 +248,7 @@ describe("答题页就近设置", () => {
   });
 
   it("展开后显示答题模式、置信度与 AI 表单", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
+    const settings = makeSettings();
     settings.ui.sectionStates = { "solve.solving": true, "solve.ai": true };
     const state = makeState({ settings });
     const { controller } = makeController(state);
@@ -253,7 +262,7 @@ describe("答题页就近设置", () => {
   });
 
   it("答题页不再出现题库阈值与翻页设置，避免设置重复", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
+    const settings = makeSettings();
     settings.ui.sectionStates = { "solve.solving": true, "solve.ai": true };
     const state = makeState({ settings });
     const { controller } = makeController(state);
@@ -282,7 +291,7 @@ describe("题库页就近设置", () => {
   });
 
   it("展开后可直接配置模糊阈值、缓存天数与远程题库", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
+    const settings = makeSettings();
     settings.ui.sectionStates = { "bank.settings": true };
     const state = makeState({ settings });
     const { controller } = makeController(state);
@@ -297,7 +306,7 @@ describe("题库页就近设置", () => {
 });
 
 describe("设置页只保留全局项", () => {
-  it("渲染 4 个全局板块，默认只展开外观", () => {
+  it("渲染 5 个全局板块（含关于），默认只展开外观", () => {
     const state = makeState();
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
@@ -307,11 +316,13 @@ describe("设置页只保留全局项", () => {
       "settings.advanced",
       "settings.data",
       "settings.logs",
+      "settings.about",
     ]);
     expect(expanded(container, "settings.appearance")).toBe("true");
     expect(expanded(container, "settings.advanced")).toBe("false");
     expect(expanded(container, "settings.data")).toBe("false");
     expect(expanded(container, "settings.logs")).toBe("false");
+    expect(expanded(container, "settings.about")).toBe("false");
   });
 
   it("答题/AI/自动翻页/题库设置不再出现在设置页", () => {
@@ -329,13 +340,13 @@ describe("设置页只保留全局项", () => {
   });
 
   it("旧 sectionStates key 不会打开新板块", () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
+    const settings = makeSettings();
     settings.ui.sectionStates = { solving: true, ai: true, autoTurn: true, bank: true, media: true };
     const state = makeState({ settings });
     const { controller } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
 
-    expect(sectionIds(container)).toHaveLength(4);
+    expect(sectionIds(container)).toHaveLength(5);
     expect(expanded(container, "settings.appearance")).toBe("true");
     expect(expanded(container, "settings.advanced")).toBe("false");
   });
@@ -354,7 +365,7 @@ describe("设置页只保留全局项", () => {
     });
   });
 
-  it("全部展开只写入设置页的 4 个板块", () => {
+  it("全部展开只写入设置页的 5 个板块", () => {
     const state = makeState();
     const { controller, saveSettings } = makeController(state);
     const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
@@ -369,12 +380,13 @@ describe("设置页只保留全局项", () => {
       "settings.advanced",
       "settings.data",
       "settings.logs",
+      "settings.about",
     ]);
     expect(Object.values(patch.ui.sectionStates).every(Boolean)).toBe(true);
   });
 
   it("日志内嵌在设置中：展开后显示筛选、导出与清空确认", async () => {
-    const settings = structuredClone(DEFAULT_SETTINGS);
+    const settings = makeSettings();
     settings.ui.sectionStates = { "settings.logs": true };
     const state = makeState({
       settings,
@@ -396,5 +408,51 @@ describe("设置页只保留全局项", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(container.textContent).toContain("清空运行日志？");
+  });
+});
+
+describe("语言选项与关于", () => {
+  it("语言设为英文时 Tab 与面板文案显示英文", () => {
+    const state = makeState();
+    state.settings.ui.language = "en";
+    state.settings.ui.collapsed = false;
+    const { controller } = makeController(state);
+    const container = mount(h(App, { controller }));
+
+    const tabs = Array.from(container.querySelectorAll(".sh-tab")).map((tab) => tab.textContent);
+    expect(tabs).toEqual(["Home", "Solve", "Bank", "Settings"]);
+    expect(container.querySelector(".sh-root")?.getAttribute("lang")).toBe("en");
+    expect(container.textContent).toContain("Home");
+  });
+
+  it("设置页可以切换语言并写入 ui.language", () => {
+    const state = makeState();
+    const { controller, saveSettings } = makeController(state);
+    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
+
+    const english = findButton(container, "English");
+    expect(english).toBeDefined();
+    english?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(saveSettings).toHaveBeenCalledWith({ ui: { language: "en" } });
+  });
+
+  it("关于板块展示开发者与项目地址", () => {
+    const settings = makeSettings();
+    settings.ui.sectionStates = { "settings.about": true };
+    const state = makeState({ settings });
+    const { controller } = makeController(state);
+    const container = mount(h(SettingsPage, { controller, state, onNavigate: () => undefined }));
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("关于");
+    expect(text).toContain("jialuo");
+    expect(text).toContain("MIT");
+    expect(text).toContain("github.com/jialuo999/xxt_study");
+
+    const link = container.querySelector<HTMLAnchorElement>("a.sh-link");
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("https://github.com/jialuo999/xxt_study");
+    expect(link?.getAttribute("target")).toBe("_blank");
   });
 });

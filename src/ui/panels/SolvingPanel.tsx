@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import type { DeepPartial, Settings } from "@/core/settings";
-import { MODE_LABEL } from "@/ui/labels";
+import { t } from "@/core/i18n";
+import { modeLabel } from "@/ui/labels";
 import { Button, Field, Modal, Segmented, Toggle } from "@/ui/components";
 import type { PageProps } from "../pages/shared";
 
@@ -16,25 +17,25 @@ export function SolvingPanel({ controller, state }: Pick<PageProps, "controller"
         value={solving.mode}
         onChange={(mode) => save({ solving: { mode } })}
         options={[
-          { value: "hint", label: MODE_LABEL.hint },
-          { value: "review", label: MODE_LABEL.review },
-          { value: "auto", label: MODE_LABEL.auto },
+          { value: "hint", label: modeLabel("hint") },
+          { value: "review", label: modeLabel("review") },
+          { value: "auto", label: modeLabel("auto") },
         ]}
       />
       <div style="margin-top:8px">
         <Toggle
           checked={solving.autoSubmit}
           onChange={(autoSubmit) => save({ solving: { autoSubmit } })}
-          label="自动提交"
-          description="全自动模式下自动提交"
+          label={t("solvingPanel.autoSubmit")}
+          description={t("solvingPanel.autoSubmitHint")}
         />
         <Toggle
           checked={solving.includeTypes.short}
           onChange={(enabled) =>
             save({ solving: { includeTypes: { ...solving.includeTypes, short: enabled } } })
           }
-          label="作答简答题"
-          description="AI 生成简答文本"
+          label={t("solvingPanel.shortAnswer")}
+          description={t("solvingPanel.shortAnswerHint")}
         />
         <Toggle
           checked={solving.allowExam}
@@ -42,13 +43,15 @@ export function SolvingPanel({ controller, state }: Pick<PageProps, "controller"
             if (enabled) setExamConfirm(true);
             else save({ solving: { allowExam: false } });
           }}
-          label="允许在考试页面自动作答"
-          description="高风险，默认关闭"
+          label={t("solvingPanel.allowExam")}
+          description={t("solvingPanel.allowExamHint")}
         />
       </div>
       <Field
-        label={`最低置信度：${Math.round(solving.minConfidence * 100)}%`}
-        hint="低于该值标记待确认"
+        label={t("solvingPanel.minConfidence", {
+          percent: Math.round(solving.minConfidence * 100),
+        })}
+        hint={t("solvingPanel.minConfidenceHint")}
       >
         <input
           class="sh-range"
@@ -65,12 +68,12 @@ export function SolvingPanel({ controller, state }: Pick<PageProps, "controller"
 
       <Modal
         open={examConfirm}
-        title="确认开启考试作答？"
+        title={t("solvingPanel.examTitle")}
         onClose={() => setExamConfirm(false)}
         actions={
           <>
             <Button size="sm" variant="ghost" onClick={() => setExamConfirm(false)}>
-              保持关闭
+              {t("solvingPanel.keepOff")}
             </Button>
             <Button
               size="sm"
@@ -80,12 +83,12 @@ export function SolvingPanel({ controller, state }: Pick<PageProps, "controller"
                 setExamConfirm(false);
               }}
             >
-              我了解风险，开启
+              {t("solvingPanel.enableExam")}
             </Button>
           </>
         }
       >
-        在考试页面自动作答可能违反学校与平台规定，并可能触发风控。请确认你有权这样做，并自行承担后果。
+        {t("solvingPanel.examBody")}
       </Modal>
     </>
   );

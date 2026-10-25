@@ -1,3 +1,4 @@
+import { t } from "@/core/i18n";
 import { collectDocumentMedia, focusMedia } from "./media-preferences";
 
 /**
@@ -212,7 +213,10 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
       if (!state.notified) {
         state.notified = true;
         warn(
-          `自动恢复播放连续失败 ${MAX_CONSECUTIVE_FAILURES} 次，暂停重试 ${FAILURE_BACKOFF_MS / 1000} 秒`,
+          t("guard.resumeFailed", {
+            count: MAX_CONSECUTIVE_FAILURES,
+            seconds: FAILURE_BACKOFF_MS / 1000,
+          }),
         );
       }
     }
@@ -237,12 +241,12 @@ export function startPlaybackGuard(options: PlaybackGuardOptions = {}): Playback
     const delta = currentTime - baseTime;
     if (delta > SEEK_DELTA_S) {
       stats.seeks++;
-      warn(`播放进度跳变约 ${Math.round(delta)} 秒（仅记录，不调整进度）`);
+      warn(t("guard.seek", { seconds: Math.round(delta) }));
       return;
     }
     if (delta <= STALL_DELTA_S) {
       stats.stalls++;
-      warn("恢复播放后 2 秒内进度未增长，可能被播放器拦截");
+      warn(t("guard.stall"));
     }
   };
 

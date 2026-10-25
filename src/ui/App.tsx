@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { TargetedPointerEvent } from "preact";
+import { applyLanguage, t } from "@/core/i18n";
 import type { UiController, UiState } from "./contract";
 import { useController } from "./useController";
 import { Badge, Icon, IconButton, Modal, Button } from "./components";
-import { TABS, type TabId } from "./tabs";
+import { TABS, tabLabel, type TabId } from "./tabs";
 import { HomePage } from "./pages/Home";
 import { SolvePage } from "./pages/Solve";
 import { BankPage } from "./pages/Bank";
@@ -18,6 +19,7 @@ interface Position {
 
 export function App({ controller }: { controller: UiController }) {
   const state = useController(controller);
+  const locale = applyLanguage(state.settings.ui.language);
   const [tab, setTab] = useState<TabId>(() => readInitialTab());
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const [position, setPosition] = useState<Position>(() => resolvePosition(state));
@@ -165,17 +167,18 @@ export function App({ controller }: { controller: UiController }) {
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);
   const statusTone =
     state.status === "error" ? "error" : busy ? "busy" : state.page.supported ? "ok" : "idle";
-  const statusLabel = state.statusText || (state.page.supported ? "已就绪" : "未适配");
+  const statusLabel =
+    state.statusText || (state.page.supported ? t("app.statusReady") : t("app.statusUnsupported"));
 
   return (
-    <div class="sh-root" data-theme={theme} lang="zh-CN">
+    <div class="sh-root" data-theme={theme} lang={locale}>
       {collapsed ? (
         <button
           type="button"
           class="sh-bubble"
           style={{ left: `${position.x}px`, top: `${position.y}px` }}
-          aria-label="打开学习助手"
-          title="学习助手（拖动可移动）"
+          aria-label={t("app.bubbleOpen")}
+          title={t("app.bubbleHint")}
           onPointerDown={(event) => startDrag(event, "bubble")}
         >
           <Icon name="bookOpen" size={25} className="sh-bubble__glyph" />
@@ -192,7 +195,7 @@ export function App({ controller }: { controller: UiController }) {
           }}
           role="dialog"
           aria-modal="false"
-          aria-label="学习助手面板"
+          aria-label={t("app.panelAria")}
         >
           <header
             class="sh-panel__header"
@@ -203,8 +206,8 @@ export function App({ controller }: { controller: UiController }) {
                 <Icon name="bookOpen" size={17} />
               </div>
               <div>
-                <div class="sh-brand__title">学习助手</div>
-                <div class="sh-brand__sub">Study Helper</div>
+                <div class="sh-brand__title">{t("app.name")}</div>
+                <div class="sh-brand__sub">{t("app.subtitle")}</div>
               </div>
             </div>
             <div class="sh-header__actions">
@@ -214,13 +217,13 @@ export function App({ controller }: { controller: UiController }) {
               </span>
               <IconButton
                 icon="close"
-                label="收起面板"
+                label={t("app.collapse")}
                 onClick={() => controller.setCollapsed(true)}
               />
             </div>
           </header>
 
-          <nav class="sh-tabs" aria-label="功能标签">
+          <nav class="sh-tabs" aria-label={t("app.tabsAria")}>
             {TABS.map((item) => (
               <button
                 type="button"
@@ -229,7 +232,7 @@ export function App({ controller }: { controller: UiController }) {
                 data-active={tab === item.id ? "true" : "false"}
                 onClick={() => setTab(item.id)}
               >
-                {item.label}
+                {tabLabel(item.id)}
               </button>
             ))}
           </nav>
@@ -238,9 +241,11 @@ export function App({ controller }: { controller: UiController }) {
             <div class="sh-verify" role="alert">
               <Icon name="alert" size={15} />
               <div class="sh-verify__copy">
-                <div class="sh-verify__title">需要手动完成人机验证</div>
+                <div class="sh-verify__title">{t("verify.title")}</div>
                 <div class="sh-verify__desc">
-                  {`${state.verification.message || "平台要求人机验证"}。自动翻页不会继续，请在页面中完成验证后重新开始。`}
+                  {t("verify.desc", {
+                    message: state.verification.message || t("verify.fallback"),
+                  })}
                 </div>
               </div>
             </div>
@@ -272,7 +277,7 @@ export function App({ controller }: { controller: UiController }) {
 
       <Modal
         open={!state.noticeAccepted && !noticeDismissed}
-        title="使用须知"
+        title={t("notice.title")}
         onClose={() => {
           setNoticeDismissed(true);
           controller.setCollapsed(true);
@@ -287,7 +292,7 @@ export function App({ controller }: { controller: UiController }) {
                 controller.setCollapsed(true);
               }}
             >
-              暂不使用
+              {t("notice.decline")}
             </Button>
             <Button
               size="sm"
@@ -297,7 +302,7 @@ export function App({ controller }: { controller: UiController }) {
                 setNoticeDismissed(true);
               }}
             >
-              我已知晓
+              {t("notice.accept")}
             </Button>
           </>
         }
@@ -305,19 +310,15 @@ export function App({ controller }: { controller: UiController }) {
         <div class="sh-stack" style="gap:8px">
           <div class="sh-row" style="align-items:flex-start;gap:8px">
             <Icon name="shield" size={17} />
-            <div>
-              本工具用于个人学习辅助，默认「复核后提交」，考试页面默认禁用。
-            </div>
+            <div>{t("notice.line1")}</div>
           </div>
-          <div>
-            请遵守学校与平台的用户协议；不要用于代考、刷课或任何违规用途。工具不会伪造视频进度、绕过验证码或对抗平台检测。
-          </div>
+          <div>{t("notice.line2")}</div>
           <div class="sh-row" style="gap:6px;flex-wrap:wrap">
-            <Badge tone="success">本地题库</Badge>
-            <Badge tone="info">OpenAI 兼容</Badge>
-            <Badge tone="warn">默认人工复核</Badge>
+            <Badge tone="success">{t("notice.badgeBank")}</Badge>
+            <Badge tone="info">{t("notice.badgeOpenAI")}</Badge>
+            <Badge tone="warn">{t("notice.badgeReview")}</Badge>
           </div>
-          <div class="sh-hint">继续使用即表示你理解并自行承担相关风险。</div>
+          <div class="sh-hint">{t("notice.hint")}</div>
         </div>
       </Modal>
     </div>

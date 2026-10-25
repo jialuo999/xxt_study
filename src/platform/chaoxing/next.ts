@@ -7,6 +7,7 @@
  * 约定：只点击一次，不循环、不延迟；是否继续翻页由上层（auto-turn）决定。
  */
 import type { NextResult } from "../../core/types";
+import { t } from "../../core/i18n";
 import type { PageContext } from "../types";
 import { clickElement, queryAll, queryFirst, textOf } from "../../utils/dom";
 import { NEXT_SELECTORS, NEXT_TEXT_KEYWORDS } from "./selectors";
@@ -67,7 +68,7 @@ function clickAndReport(
   return {
     ok: true,
     action,
-    message: `已点击「${label}」`,
+    message: t("next.clicked", { label }),
     url: currentUrl(ctx),
   };
 }
@@ -89,7 +90,7 @@ export async function nextPage(ctx: PageContext): Promise<NextResult> {
       return {
         ok: false,
         action: "catalog-end",
-        message: "章节目录中没有待完成的章节",
+        message: t("next.noPendingChapter"),
         url: currentUrl(ctx),
       };
     }
@@ -122,14 +123,14 @@ export async function nextPage(ctx: PageContext): Promise<NextResult> {
     return {
       ok: false,
       action: "none",
-      message: "未找到「下一节/下一章/下一页/下一题」按钮",
+      message: t("next.noButton"),
       url: currentUrl(ctx),
     };
   } catch (error) {
     return {
       ok: false,
       action: "none",
-      message: `翻页异常：${errorText(error)}`,
+      message: t("next.error", { message: errorText(error) }),
       url: currentUrl(ctx),
     };
   }

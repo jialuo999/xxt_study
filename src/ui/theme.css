@@ -1358,3 +1358,17 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+.sh-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--sh-accent-2);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.sh-link:hover {
+  text-decoration: underline;
+}

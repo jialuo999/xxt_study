@@ -10,7 +10,8 @@ import {
   Spinner,
   TextInput,
 } from "@/ui/components";
-import { QUESTION_TYPE_LABEL } from "@/core/settings";
+import { questionTypeLabel } from "@/ui/labels";
+import { applyLanguage, t } from "@/core/i18n";
 import { formatAnswer } from "@/utils/text";
 import type { BankEntry } from "@/core/types";
 import { downloadText, formatDateTime } from "@/ui/tabs";
@@ -19,6 +20,7 @@ import { SECTION_KEYS, isSectionOpen, toggleSection } from "@/ui/sections";
 import type { PageProps } from "./shared";
 
 export function BankPage({ controller, state }: PageProps) {
+  applyLanguage(state.settings.ui.language);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -38,7 +40,11 @@ export function BankPage({ controller, state }: PageProps) {
       const result = await controller.importBankFile(file);
       setImportResult(result.message);
     } catch (error) {
-      setImportResult(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+      setImportResult(
+        t("bank.importFailed", {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
     } finally {
       setImporting(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -81,10 +87,8 @@ export function BankPage({ controller, state }: PageProps) {
           <div class="sh-row" style="align-items:flex-start">
             <Icon name="alert" size={16} />
             <div class="sh-grow">
-              <div class="sh-card__title">当前为内存模式，刷新会丢失题库</div>
-              <div class="sh-card__hint">
-                浏览器 IndexedDB 不可用（隐私模式/策略限制）。导入的题库只保存在当前页面内存中，请先导出备份，或更换浏览器设置后重新导入。
-              </div>
+              <div class="sh-card__title">{t("bank.memoryTitle")}</div>
+              <div class="sh-card__hint">{t("bank.memoryDesc")}</div>
             </div>
           </div>
         </Card>
@@ -93,7 +97,7 @@ export function BankPage({ controller, state }: PageProps) {
         <Card>
           <div class="sh-stat">
             <div class="sh-stat__value">{state.bank.total}</div>
-            <div class="sh-stat__label">题库条目</div>
+            <div class="sh-stat__label">{t("bank.statEntries")}</div>
           </div>
         </Card>
         <Card>
@@ -101,17 +105,17 @@ export function BankPage({ controller, state }: PageProps) {
             <div class="sh-stat__value" style="font-size:15px">
               {formatDateTime(state.bank.lastUpdated)}
             </div>
-            <div class="sh-stat__label">最近更新</div>
+            <div class="sh-stat__label">{t("bank.statUpdated")}</div>
           </div>
         </Card>
       </div>
 
       <Card
-        title="导入题库"
-        hint="支持 JSON / CSV / TSV / TXT，自动去重、按题干与选项匹配"
+        title={t("bank.importTitle")}
+        hint={t("bank.importHint")}
         action={
           <Badge tone={state.bank.total > 0 ? "success" : "muted"}>
-            {state.bank.total > 0 ? "可用" : "空"}
+            {state.bank.total > 0 ? t("bank.available") : t("bank.empty")}
           </Badge>
         }
       >
@@ -148,11 +152,11 @@ export function BankPage({ controller, state }: PageProps) {
           <div class="sh-row" style="justify-content:center;gap:7px">
             {importing ? <Spinner size={15} /> : <Icon name="upload" size={16} />}
             <span style="font-size:12px;font-weight:600">
-              {importing ? "正在导入…" : "点击选择或拖拽题库文件"}
+              {importing ? t("bank.importing") : t("bank.dropHint")}
             </span>
           </div>
           <div class="sh-hint" style="margin-top:5px">
-            CSV 列名：type, question, optionA-F, answer, source（也兼容中文表头）
+            {t("bank.csvHint")}
           </div>
         </div>
         {importResult ? (
@@ -162,7 +166,7 @@ export function BankPage({ controller, state }: PageProps) {
         ) : null}
         <div class="sh-actions" style="margin-top:9px">
           <Button size="sm" icon="download" disabled={exporting} onClick={() => void doExport()}>
-            导出题库
+            {t("bank.export")}
           </Button>
           <Button
             size="sm"
@@ -171,15 +175,15 @@ export function BankPage({ controller, state }: PageProps) {
             disabled={state.bank.total === 0}
             onClick={() => setConfirmClear(true)}
           >
-            清空
+            {t("bank.clear")}
           </Button>
         </div>
       </Card>
 
-      <Card title="检索" hint="按题干文本模糊搜索本地题库">
+      <Card title={t("bank.searchTitle")} hint={t("bank.searchHint")}>
         <div class="sh-searchbar">
           <TextInput
-            placeholder="输入题干关键词…"
+            placeholder={t("bank.searchPlaceholder")}
             value={query}
             onInput={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -187,7 +191,7 @@ export function BankPage({ controller, state }: PageProps) {
             }}
           />
           <Button size="sm" icon="search" disabled={searching} onClick={() => void doSearch()}>
-            搜索
+            {t("bank.searchButton")}
           </Button>
         </div>
         {found.length > 0 ? (
@@ -199,13 +203,16 @@ export function BankPage({ controller, state }: PageProps) {
                     {entry.stem}
                   </div>
                   <div class="sh-row" style="gap:5px;flex-wrap:wrap">
-                    <Badge tone="muted">{QUESTION_TYPE_LABEL[entry.type]}</Badge>
+                    <Badge tone="muted">{questionTypeLabel(entry.type)}</Badge>
                     <span class="sh-small" style="color:var(--sh-accent-2)">
                       {formatAnswer(entry.answer)}
                     </span>
                   </div>
                   <div class="sh-hint" style="margin-top:3px">
-                    来源：{entry.source || "未知"} · {formatDateTime(entry.updatedAt)}
+                    {t("bank.source", {
+                      source: entry.source || t("bank.unknownSource"),
+                      time: formatDateTime(entry.updatedAt),
+                    })}
                   </div>
                 </div>
               </div>
@@ -213,23 +220,25 @@ export function BankPage({ controller, state }: PageProps) {
           </div>
         ) : query && !searching ? (
           <div class="sh-hint" style="margin-top:8px">
-            没有命中，试试缩短关键词，或导入更多题库。
+            {t("bank.searchEmpty")}
           </div>
         ) : null}
       </Card>
 
       <CollapsibleCard
         id={SECTION_KEYS.bankSettings}
-        title="题库设置"
-        hint="匹配阈值、缓存与远程接口"
-        summary={`阈值 ${state.settings.bank.fuzzyThreshold.toFixed(2)} · 缓存 ${
-          state.settings.bank.cacheTtlDays
-        } 天 · 远程${state.settings.bank.remote.enabled ? "已启用" : "关闭"}`}
+        title={t("bank.settingsTitle")}
+        hint={t("bank.settingsHint")}
+        summary={t("bank.settingsSummary", {
+          threshold: state.settings.bank.fuzzyThreshold.toFixed(2),
+          days: state.settings.bank.cacheTtlDays,
+          remote: state.settings.bank.remote.enabled ? t("bank.remoteOn") : t("bank.remoteOff"),
+        })}
         open={isSectionOpen(sectionStates, SECTION_KEYS.bankSettings)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.bankSettings)}
         action={
           <Badge tone={state.settings.bank.remote.enabled ? "info" : "muted"}>
-            {state.settings.bank.remote.enabled ? "HTTP" : "本地"}
+            {state.settings.bank.remote.enabled ? t("bank.badgeHttp") : t("bank.badgeLocal")}
           </Badge>
         }
       >
@@ -238,12 +247,12 @@ export function BankPage({ controller, state }: PageProps) {
 
       <Modal
         open={confirmClear}
-        title="清空本地题库？"
+        title={t("bank.clearTitle")}
         onClose={() => setConfirmClear(false)}
         actions={
           <>
             <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               size="sm"
@@ -253,24 +262,24 @@ export function BankPage({ controller, state }: PageProps) {
                 void controller.clearBank();
               }}
             >
-              确认清空
+              {t("bank.clearConfirm")}
             </Button>
           </>
         }
       >
-        将删除本机浏览器中的全部题库条目与解题缓存，无法撤销。建议先导出备份。
+        {t("bank.clearBody")}
       </Modal>
 
       {state.bank.total === 0 ? (
         <EmptyState
           icon="book"
-          title="题库还是空的"
-          description="导入已有题库后，解题会优先命中本地答案，速度更快、成本更低。"
+          title={t("bank.emptyTitle")}
+          description={t("bank.emptyDesc")}
         />
       ) : null}
 
       <div class="sh-hint" style="text-align:center;padding:2px 0 6px">
-        题库仅保存在本机 IndexedDB，不会上传
+        {t("bank.footer")}
       </div>
     </div>
   );

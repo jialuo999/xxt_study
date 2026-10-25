@@ -10,8 +10,16 @@ import {
   Segmented,
   Spinner,
 } from "@/ui/components";
-import { MODE_LABEL, SOURCE_LABEL, SOURCE_TONE, STATUS_LABEL, STATUS_TONE } from "@/ui/labels";
-import { PAGE_KIND_LABEL, QUESTION_TYPE_LABEL } from "@/core/settings";
+import {
+  SOURCE_TONE,
+  STATUS_TONE,
+  modeLabel,
+  pageKindLabel,
+  questionTypeLabel,
+  sourceLabel,
+  statusLabel,
+} from "@/ui/labels";
+import { applyLanguage, t } from "@/core/i18n";
 import { formatAnswer } from "@/utils/text";
 import { AiPanel } from "@/ui/panels/AiPanel";
 import { SolvingPanel } from "@/ui/panels/SolvingPanel";
@@ -22,6 +30,7 @@ import type { PageProps } from "./shared";
 type Filter = "all" | "pending" | "solved" | "failed";
 
 export function SolvePage({ controller, state }: PageProps) {
+  applyLanguage(state.settings.ui.language);
   const [filter, setFilter] = useState<Filter>("all");
   const { questions, results, settings, page } = state;
   const busy = ["scanning", "solving", "filling", "submitting"].includes(state.status);
@@ -45,21 +54,23 @@ export function SolvePage({ controller, state }: PageProps) {
         <div class="sh-row sh-row--between">
           <div class="sh-grow">
             <div class="sh-card__title">
-              {PAGE_KIND_LABEL[page.kind]} · {questions.length} 题
+              {t("solve.title", { kind: pageKindLabel(page.kind), count: questions.length })}
             </div>
             <div class="sh-card__hint">
-              {MODE_LABEL[settings.solving.mode]}
-              {settings.solving.autoSubmit ? " · 自动提交" : " · 手动提交"}
+              {modeLabel(settings.solving.mode)}
+              {settings.solving.autoSubmit ? t("solve.autoSubmitSuffix") : t("solve.manualSubmitSuffix")}
             </div>
           </div>
           <Badge tone={examBlocked ? "danger" : solved === questions.length && questions.length > 0 ? "success" : "accent"}>
-            {examBlocked ? "考试保护" : `${solved}/${questions.length} 已答`}
+            {examBlocked
+              ? t("solve.examProtected")
+              : t("solve.answered", { solved, total: questions.length })}
           </Badge>
         </div>
         {state.progress ? (
           <div style="margin-top:9px">
             <div class="sh-row sh-row--between" style="margin-bottom:4px">
-              <span class="sh-small sh-muted">解题进度</span>
+              <span class="sh-small sh-muted">{t("solve.progress")}</span>
               <span class="sh-small sh-faint">
                 {state.progress.done}/{state.progress.total}
               </span>
@@ -69,7 +80,7 @@ export function SolvePage({ controller, state }: PageProps) {
         ) : null}
         <div class="sh-actions" style="margin-top:10px">
           <Button size="sm" icon="scan" disabled={busy} onClick={() => void controller.refresh()}>
-            扫描
+            {t("solve.scan")}
           </Button>
           <Button
             size="sm"
@@ -78,7 +89,7 @@ export function SolvePage({ controller, state }: PageProps) {
             disabled={busy || questions.length === 0 || examBlocked}
             onClick={() => void controller.solve()}
           >
-            {state.status === "solving" ? "解题中…" : "开始解题"}
+            {state.status === "solving" ? t("solve.solving") : t("solve.start")}
           </Button>
           <Button
             size="sm"
@@ -86,7 +97,7 @@ export function SolvePage({ controller, state }: PageProps) {
             disabled={busy || solved === 0 || examBlocked || hintMode}
             onClick={() => void controller.fillAll()}
           >
-            全部填入
+            {t("solve.fillAll")}
           </Button>
           <Button
             size="sm"
@@ -94,21 +105,24 @@ export function SolvePage({ controller, state }: PageProps) {
             disabled={busy || questions.length === 0 || examBlocked || hintMode}
             onClick={() => void controller.submit()}
           >
-            提交
+            {t("solve.submit")}
           </Button>
         </div>
         <div class="sh-hint" style="margin-top:6px">
           {hintMode
-            ? "「仅提示」模式不会自动填入或提交"
-            : `已填入 ${filledCount}/${questions.length} 题；手动填写后首次提交会要求二次确认`}
+            ? t("solve.hintMode")
+            : t("solve.filledHint", { filled: filledCount, total: questions.length })}
         </div>
       </Card>
 
       <CollapsibleCard
         id={SECTION_KEYS.solveSolving}
-        title="答题设置"
-        hint="作答方式、题型与最低置信度"
-        summary={`${MODE_LABEL[settings.solving.mode]} · 最低 ${confidence}%`}
+        title={t("solve.settingsTitle")}
+        hint={t("solve.settingsHint")}
+        summary={t("solve.settingsSummary", {
+          mode: modeLabel(settings.solving.mode),
+          confidence,
+        })}
         open={isSectionOpen(sectionStates, SECTION_KEYS.solveSolving)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.solveSolving)}
       >
@@ -117,16 +131,19 @@ export function SolvePage({ controller, state }: PageProps) {
 
       <CollapsibleCard
         id={SECTION_KEYS.solveAi}
-        title="AI 接口"
-        hint="OpenAI 兼容，Key 仅存本机"
-        summary={`${settings.ai.enabled ? "已启用" : "未启用"} · ${
-          settings.ai.apiKey ? "Key 已配置" : "未配置 Key"
-        }`}
+        title={t("solve.aiTitle")}
+        hint={t("solve.aiHint")}
+        summary={t("solve.aiSummary", {
+          enabled: settings.ai.enabled ? t("common.enabled") : t("common.disabled"),
+          keyState: settings.ai.apiKey
+            ? t("solve.aiSummaryKeySet")
+            : t("solve.aiSummaryKeyMissing"),
+        })}
         open={isSectionOpen(sectionStates, SECTION_KEYS.solveAi)}
         onToggle={() => toggleSection(controller, sectionStates, SECTION_KEYS.solveAi)}
         action={
           <Badge tone={settings.ai.enabled ? "success" : "muted"}>
-            {settings.ai.enabled ? "启用" : "关闭"}
+            {settings.ai.enabled ? t("solve.aiBadgeOn") : t("solve.aiBadgeOff")}
           </Badge>
         }
       >
@@ -136,11 +153,11 @@ export function SolvePage({ controller, state }: PageProps) {
       {questions.length === 0 ? (
         <EmptyState
           icon="scan"
-          title="还没有采集到题目"
-          description="打开作业/章节测验页面后点击扫描；若仍为空，可能是页面结构变化，请在 设置 → 运行日志 中查看诊断。"
+          title={t("solve.emptyTitle")}
+          description={t("solve.emptyDesc")}
           action={
             <Button size="sm" icon="refresh" disabled={busy} onClick={() => void controller.refresh()}>
-              重新扫描
+              {t("solve.rescan")}
             </Button>
           }
         />
@@ -150,15 +167,15 @@ export function SolvePage({ controller, state }: PageProps) {
             value={filter}
             onChange={setFilter}
             options={[
-              { value: "all", label: `全部 ${questions.length}` },
-              { value: "pending", label: `待确认 ${pending}` },
-              { value: "solved", label: `已答 ${solved}` },
-              { value: "failed", label: `失败 ${failed}` },
+              { value: "all", label: t("solve.filterAll", { count: questions.length }) },
+              { value: "pending", label: t("solve.filterPending", { count: pending }) },
+              { value: "solved", label: t("solve.filterSolved", { count: solved }) },
+              { value: "failed", label: t("solve.filterFailed", { count: failed }) },
             ]}
           />
           {state.status === "solving" ? (
             <div class="sh-row sh-small sh-muted" style="justify-content:center;gap:6px">
-              <Spinner size={13} /> 正在请求题库与 AI…
+              <Spinner size={13} /> {t("solve.solvingHint")}
             </div>
           ) : null}
           <div class="sh-list">
@@ -170,14 +187,18 @@ export function SolvePage({ controller, state }: PageProps) {
               />
             ))}
             {visible.length === 0 ? (
-              <EmptyState icon="check" title="这个筛选下没有题目" description="切换到「全部」查看。" />
+              <EmptyState
+                icon="check"
+                title={t("solve.filterEmptyTitle")}
+                description={t("solve.filterEmptyDesc")}
+              />
             ) : null}
           </div>
         </>
       )}
 
       <div class="sh-hint" style="text-align:center;padding:2px 0 6px">
-        答案按选项文本匹配，选项乱序也能正确填入
+        {t("solve.footer")}
       </div>
     </div>
   );
@@ -189,18 +210,18 @@ function QuestionItem({ question, result }: { question: Question; result?: Solve
     <div class="sh-qitem" data-status={status}>
       <div class="sh-qitem__head">
         <span class="sh-qitem__index">#{question.index + 1}</span>
-        <Badge tone="muted">{QUESTION_TYPE_LABEL[question.type]}</Badge>
+        <Badge tone="muted">{questionTypeLabel(question.type)}</Badge>
         {result ? (
           <>
-            <Badge tone={SOURCE_TONE[result.source]}>{SOURCE_LABEL[result.source]}</Badge>
-            <Badge tone={STATUS_TONE[result.status]}>{STATUS_LABEL[result.status]}</Badge>
+            <Badge tone={SOURCE_TONE[result.source]}>{sourceLabel(result.source)}</Badge>
+            <Badge tone={STATUS_TONE[result.status]}>{statusLabel(result.status)}</Badge>
           </>
         ) : (
-          <Badge tone="muted">未解题</Badge>
+          <Badge tone="muted">{t("solve.notSolved")}</Badge>
         )}
-        {question.hasImage ? <Badge tone="warn">含图</Badge> : null}
+        {question.hasImage ? <Badge tone="warn">{t("solve.hasImage")}</Badge> : null}
       </div>
-      <div class="sh-qitem__stem">{question.stem || "（空题干）"}</div>
+      <div class="sh-qitem__stem">{question.stem || t("solve.emptyStem")}</div>
       {question.options.length > 0 ? (
         <div class="sh-hint" style="margin-top:4px">
           {question.options.map((option) => `${option.key}. ${option.text}`).join("　")}
@@ -213,7 +234,7 @@ function QuestionItem({ question, result }: { question: Question; result?: Solve
         </div>
       ) : null}
       <div class="sh-qitem__meta">
-        {result ? <Confidence value={result.confidence} /> : <span class="sh-faint sh-small">等待解题</span>}
+        {result ? <Confidence value={result.confidence} /> : <span class="sh-faint sh-small">{t("solve.waiting")}</span>}
         {result ? (
           <span class="sh-faint sh-small">
             {result.latencyMs < 1000 ? `${result.latencyMs}ms` : `${(result.latencyMs / 1000).toFixed(1)}s`}

@@ -1,5 +1,7 @@
 import { mountUi } from "@/ui/mount";
 import { logger } from "@/core/logger";
+import { applyLanguage } from "@/core/i18n";
+import { getSettings } from "@/core/settings-store";
 import { findUiHost, isTopFrame } from "./frames";
 import { HostController } from "./host";
 import { FrameAgent } from "./agent";
@@ -16,6 +18,8 @@ export async function boot(): Promise<void> {
     return;
   }
 
+  // 每一帧都按设置同步界面语言（状态/翻页提示在子 frame 里生成时也能用对语言）
+  applyLanguage(getSettings().ui.language);
   // 每一帧都应用媒体偏好；跨域 iframe 由该 iframe 内的脚本自行处理
   const stopMediaPreferences = startMediaPreferences();
   // 阅读/文档任务需要在每一层 iframe 中继，直到真正的文档页

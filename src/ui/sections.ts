@@ -10,6 +10,7 @@ export const SECTION_KEYS = {
   settingsAdvanced: "settings.advanced",
   settingsData: "settings.data",
   settingsLogs: "settings.logs",
+  settingsAbout: "settings.about",
 } as const;
 
 export type SectionKey = (typeof SECTION_KEYS)[keyof typeof SECTION_KEYS];
@@ -24,6 +25,7 @@ export const SECTION_DEFAULT_OPEN: Record<SectionKey, boolean> = {
   "settings.advanced": false,
   "settings.data": false,
   "settings.logs": false,
+  "settings.about": false,
 };
 
 export const SETTINGS_PAGE_SECTIONS: SectionKey[] = [
@@ -31,6 +33,7 @@ export const SETTINGS_PAGE_SECTIONS: SectionKey[] = [
   SECTION_KEYS.settingsAdvanced,
   SECTION_KEYS.settingsData,
   SECTION_KEYS.settingsLogs,
+  SECTION_KEYS.settingsAbout,
 ];
 
 export function isSectionOpen(

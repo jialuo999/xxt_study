@@ -1,11 +1,24 @@
+import { getLocale, t, type MessageKey } from "@/core/i18n";
+
 export type TabId = "home" | "solve" | "bank" | "settings";
 
-export const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "home", label: "主页" },
-  { id: "solve", label: "答题" },
-  { id: "bank", label: "题库" },
-  { id: "settings", label: "设置" },
+const TAB_KEY: Record<TabId, MessageKey> = {
+  home: "tab.home",
+  solve: "tab.solve",
+  bank: "tab.bank",
+  settings: "tab.settings",
+};
+
+export const TABS: Array<{ id: TabId }> = [
+  { id: "home" },
+  { id: "solve" },
+  { id: "bank" },
+  { id: "settings" },
 ];
+
+export function tabLabel(id: TabId): string {
+  return t(TAB_KEY[id]);
+}
 
 export function downloadText(filename: string, text: string, mime = "application/json"): void {
   try {
@@ -25,8 +38,8 @@ export function downloadText(filename: string, text: string, mime = "application
 }
 
 export function formatDateTime(ts: number | null): string {
-  if (!ts) return "从未";
-  return new Date(ts).toLocaleString("zh-CN", {
+  if (!ts) return t("common.never");
+  return new Date(ts).toLocaleString(getLocale(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
