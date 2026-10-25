@@ -4,7 +4,7 @@
 
 Brings **automatic page turning**, **question recognition and answering**, **local question-bank lookup**, and **AI solving** to study-platform pages.
 
-![Panel preview](dev/preview.png)
+
 
 ## Features
 
@@ -123,15 +123,15 @@ Expected response:
 
 ## Supported pages
 
-| Page | Capability |
-| --------------------------------------- | ------------------- |
-| `/mycourse/studentstudy` chapter study | Automatic page turning, resume |
-| `/knowledge/cards` knowledge cards | In-card paging, wait for video, skip completed task points |
-| `ananas/modules/video/` video | Wait for playback to finish |
-| `pan-yz.chaoxing.com/screen/...` document preview | Auto-scroll to the end (reading / document task points) |
+| Page                                                  | Capability                                                 |
+| ----------------------------------------------------- | ---------------------------------------------------------- |
+| `/mycourse/studentstudy` chapter study                | Automatic page turning, resume                             |
+| `/knowledge/cards` knowledge cards                    | In-card paging, wait for video, skip completed task points |
+| `ananas/modules/video/` video                         | Wait for playback to finish                                |
+| `pan-yz.chaoxing.com/screen/...` document preview     | Auto-scroll to the end (reading / document task points)    |
 | `ananas/modules/pdf/`, `/readsvr/` document / reading | Auto-scroll / page turning (when a task point is detected) |
-| `/work/doHomeWorkNew` and other assignment pages | Collect, fill in, submit |
-| `/exam-ans/exam/test/...` exam | Collect / fill in / submit (disabled by default) |
+| `/work/doHomeWorkNew` and other assignment pages      | Collect, fill in, submit                                   |
+| `/exam-ans/exam/test/...` exam                        | Collect / fill in / submit (disabled by default)           |
 
 ## Adding other platforms
 
