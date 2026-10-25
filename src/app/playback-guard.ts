@@ -4,7 +4,7 @@ import { collectDocumentMedia, focusMedia } from "./media-preferences";
  * 播放保活守卫：自动翻页期间，平台/静音/失焦导致的 `pause` 被自动恢复，
  * 但「用户主动暂停」与「脚本主动暂停」都不会被抢。
  *
- * 设计约束（见 docs/superpowers/specs/2026-10-24-oss-informed-hardening-design.md 3.1）：
+ * 设计约束（0.2.0 加固设计文档 3.1；该文档仅在本地维护）：
  * - 只在接入方显式启动后工作，并跟随 `isEnabled`（默认跟随 video.resumeOnPause 由接入方注入）；
  * - 脚本自己暂停媒体前调用 `suspend()`，恢复目标时调用 `resume()`（不会立即播放）；
  * - pause 前 1.5s 内有播放器区域内的用户手势 → 视为人工暂停，尊重 30s 或直到 play；

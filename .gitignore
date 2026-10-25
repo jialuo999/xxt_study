@@ -1,8 +1,29 @@
+# ---- 依赖 / 构建产物 / 缓存 ----
 node_modules/
 dist/
 coverage/
-.acl-recovery/
+*.tsbuildinfo
+.vite/
+*.log
+
+# ---- 本机工具环境 ----
 .npm-cache/
 .edge-profile/
+.acl-recovery/
 *.local
 .DS_Store
+.env
+.env.*
+
+# ---- 内部文档：只留本地，不进公开仓库 ----
+# AI 维护的详版说明；面向用户的 README.md 由作者维护
+README(AI).md
+# 需求与回归清单
+REQUIREMENTS.md
+# 设计文档与开源生态调研（docs/research、docs/superpowers）
+docs/
+
+# ---- 开发过程截图 / 调试页：README 只引用 dev/preview.png 与 dev/preview.html ----
+dev/duplicate-test.*
+dev/fresh.*
+dev/preview-*.png
